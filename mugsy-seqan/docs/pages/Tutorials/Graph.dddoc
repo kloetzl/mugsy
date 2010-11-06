@@ -1,0 +1,196 @@
+.Page.Graphs:
+..XXXcat:Tutorials
+..summary:Graphs in SeqAn.
+
+..description:
+...contents
+...image:graphs
+...text:
+Graphs can be used to model a great variety of problems and hence, 
+they are in widespread use as a problem-solving tool. Directed and undirected graphs, trees, automatons, and
+alignment graphs are different types of graphs with distinct features. In SeqAn, all graph types
+are specializations of @Class.Graph@. Graphs can be traversed using @Concept.Iterator.iterators@. Besides the fundamental
+graph data structures, SeqAn provides the most well-known graph algorithms, e.g. Dijkstra's shortest
+path algorithm. The fundamental graph algorithms are supplemented with some specialized alignment algorithms.
+All graphs can be exported in dot format for visualization.
+
+...section:# Graphs
+...subsection:#.# Directed graph
+
+...image:directedGraph|A directed graph.
+
+...text:
+A @Spec.Directed graph@ has an optional cargo template argument. 
+A cargo is some kind of object attached to the edges of the graph. 
+A typical example are distances in flight network graphs.
+Cargos and edges are handled as one unit: If you add an edge you have to provide a cargo, 
+if you remove an edge you also remove the cargo. If you do not want to use cargos, you
+can leave out the $TCargo$ parameter or you can use $void$, which is the default. 
+All edges are directed that is, they have a distinct source
+and target vertex.
+...code:Graph<Directed<TCargo> > directedGraph;
+...text:
+$TCargo$ is any kind of data type, e.g. a double.
+
+
+
+...subsection:#.# Undirected graph
+
+...image:undirectedGraph|An undirected graph with multiple components.
+
+...text:
+An @Spec.Undirected graph@ has, of course, undirected edges. In all other respects, 
+it can be used in the same way as a directed graph.
+...code:Graph<Undirected<void> > undirectedGraph;
+...text:
+In this example, the edges have no cargo.
+
+
+...subsection:#.# Other graphs
+
+...image:otherGraphs|Alignment graph, tree, and trie.
+
+...text:
+SeqAn is a library for sequence analysis and hence, it makes use of graphs as helper classes 
+for string matching, alignment algorithms or phylogenetic trees. Because of that, SeqAn provides
+,besides directed and undirected graphs, specialized graphs like a @Spec.Tree@, an @Spec.Automaton@, 
+a @Spec.Trie@ or an @Spec.Alignment Graph@.
+
+...section:# Graph functions
+
+...text:
+All graphs support a set of common functions, including @Function.numEdges@, @Function.numVertices@, 
+@Function.addVertex@, @Function.removeVertex@, @Function.addEdge@ etc. The functions are listed and explained in the @Class.Graph@
+section. Besides this core set of functions, some graphs
+have specialized methods, e.g., trees support @Function.childVertex@, @Function.addChild@ and the like. See the documentation
+of these graphs for details. The following code snippet illustrates the use of some of these functions to create a directed
+graph.
+...code:
+typedef Graph<Directed<> > TGraph;
+typedef VertexDescriptor<TGraph>::Type TVertexDescriptor;
+typedef EdgeDescriptor<TGraph>::Type TEdgeDescriptor;
+TGraph g;
+TVertexDescriptor v0 = addVertex(g);
+TVertexDescriptor v1 = addVertex(g);
+TEdgeDescriptor e1 =addEdge(g,v0,v1);
+TVertexDescriptor v2 = addVertex(g);
+TVertexDescriptor v3 = addVertex(g);
+TVertexDescriptor v4 = addVertex(g);
+addEdge(g,v3,v4);
+addEdge(g,v3,v2);
+addEdge(g,v2,v2);
+addEdge(g,v3,v0);
+addEdge(g,v3,v1);
+addEdge(g,v4,v3);
+::std::cout << g << ::std::endl;
+removeVertex(g, v2);
+::std::cout << g << ::std::endl;
+...text:
+As you can see in this example, all vertices are represented by vertex descriptors and all edges are represented
+by edge descriptors. Both types can be accessed by the corresponding metafunction, namely @Metafunction.VertexDescriptor@
+and @Metafunction.EdgeDescriptor@. Vertex and edge descriptors are the value types of all iterators working
+on graphs.
+
+
+...section:# Graph iterators
+
+...text:
+@Concept.Iterator.Iterators@ are used to traverse a graph. The @Function.value@ type of vertex and edge iterators 
+are always vertex or edge descriptors, respectively. These descriptors are a kind of handle to deal with vertices and edges, 
+e.g. an edge descriptor can be used to access the @Function.cargo@ of an edge. 
+@Spec.Vertex Iterator@, @Spec.Adjacency Iterator@, 
+@Spec.Bfs Iterator@ and @Spec.Dfs Preorder Iterator@ are the basic vertex iterators. The following
+code snippet shows how to use the adjacency iterator on vertex 3 to traverse all
+adjacent neighbors of that vertex.
+...code:
+typedef Iterator<TGraph, AdjacencyIterator>::Type TAdjacencyIterator;
+TAdjacencyIterator it(g,3);
+for(;!atEnd(it);goNext(it)) {
+	std::cout << *it << std::endl;
+}
+...text:
+Notice how the metafunction @Metafunction.Iterator@ is used to get the correct iterator
+type for $TGraph$. We simply output all adjacent vertices. Besides vertex iterators, 
+SeqAn provides a simple @Spec.Edge Iterator@
+and an @Spec.Out-Edge Iterator@.
+...code:
+typedef Iterator<TGraph, OutEdgeIterator>::Type TOutEdgeIterator;
+TOutEdgeIterator it(g, v0);
+for(;!atEnd(it);goNext(it)) {
+	std::cout << cargo(*it) << std::endl;
+}
+...text:
+In this example, we traverse all out-edges of vertex 0 and print their cargos.
+
+
+...section:# Graph property maps
+
+...text:
+Property maps are a fundamental abstraction mechanism to attach auxiliary information to the vertices and
+edges of a graph. A typical example are the city names and flight distances of a flight network graph.
+In most scenarios, users should use an external property map to attach this information
+to the graph but other mechanisms do exist (e.g., the possibility to use a @Metafunction.Cargo@).
+Be aware that the word external is a hint that the information is stored independent of the graph 
+and functions like @Function.removeVertex@ do not affect the property map. Property maps are indexed
+via the already well-known vertex and edge descriptors. This is quite handy since we can use, for instance, a
+vertex iterator to traverse the graph and access the properties on the fly. Most graph algorithms
+make heavily use of this concept and therefore it is illustrated below. 
+First, let us create a simple graph.
+...code:
+typedef Graph<Directed<> > TGraph;
+typedef VertexDescriptor<TGraph>::Type TVertexDescriptor;
+typedef EdgeDescriptor<TGraph>::Type TEdgeDescriptor;
+TGraph g;
+TVertexDescriptor v0 = addVertex(g);
+TVertexDescriptor v1 = addVertex(g);
+TEdgeDescriptor e1 =addEdge(g,v0,v1);
+...text:
+Second, we have to create and resize an edge property map so that it can hold information on all edges.
+...code:
+String<unsigned int> distanceMap;
+resizeEdgeMap(g , distanceMap);
+...text:
+As you can see, property maps are simply strings of some type. In this case, we use unsigned integer to
+store the distances for our graph $g$. For each edge we can store a distance now.
+...code:
+assignProperty(distanceMap, e1, 10);
+...text:
+Note how the edge descriptor is used to access the property map. An algorithm can now traverse
+all edges and access the distances.
+...code:
+typedef Iterator<TGraph, EdgeIterator>::Type TEdgeIterator;
+TEdgeIterator it(g);
+for(;!atEnd(it);goNext(it)) {
+    std::cout << getProperty(distanceMap, *it) << std::endl;
+}
+
+
+...section:# Graph algorithms
+
+...image:contentGraph|Graph algorithms.
+
+...text:
+The above figure gives an overview of the graph algorithms currently available in SeqAn. The biological algorithms
+use heavily the alignment graph, all others use the appropriate standard graph. All algorithms require some kind
+of additional input, e.g., the Dijkstra algorithm requires a distance property map, alignment algorithms sequences and a score
+type and the network flow algorithm capacities on the edges. The basic usage can be found in the documentation but
+a simple example is given here. The following code snippet aligns two sequences.
+...code:
+typedef String<char> TString;
+typedef StringSet<TString, Dependent<> > TStringSet;
+typedef Graph<Alignment<TStringSet, void> > TGraph;
+    
+TStringSet str;
+TString str0("annual");    
+appendValue(str, str0);
+TString str1("annealing"); 
+appendValue(str, str1);
+TGraph g(str);
+Score<int> score_type = Score<int>(0,-1,-1,0);
+int score = globalAlignment(g, score_type, NeedlemanWunsch() );
+::std::cout << g << ::std::endl;
+...text:
+We first assign the sequences annual and annealing to a string set. 
+Based on this string set an alignment graph is created. A score object is
+used to configure the Needleman Wunsch algorithm and the @Function.globalAlignment@ call
+computes the alignment.

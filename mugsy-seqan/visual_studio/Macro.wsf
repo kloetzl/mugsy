@@ -1,0 +1,67 @@
+<!-- 
+
+ SEQAN Development Build System
+ List of macro commands executed from visual studio 
+
+ 2003/2004 by Andreas Doering
+ doering@inf.fu-berlin.de
+ ________________________________________________________________________
+
+-->
+<job id="CallMacro">
+	<script language="JScript">
+		
+		var TIMEOUT=5000; 
+		
+		var gStdOut;
+		var gStdErr;
+		
+		function ReadFromScriptExec(oExec)
+		{
+			while (!oExec.StdErr.AtEndOfStream)
+			{
+			     var str = oExec.StdErr.ReadLine();
+			     str = str.replace(/:([0-9]+)/, "($1) ");
+			     str = str.replace(/", line ([0-9]+):/, "($1) :");
+			     gStdErr += str + "\n";
+			}		
+			gStdOut += oExec.StdOut.Readall();
+		}
+		
+		if (WScript.Arguments.Length == 0)
+		{
+			WScript.StdErr.WriteLine("error: too few arguments");	
+		}
+		else
+		{
+			var command = WScript.Arguments(0);
+			
+			var project = "<unknown project>"; if (WScript.Arguments.Length >= 2) project = WScript.Arguments(1);
+			var mode = "<unknown mode>"; if (WScript.Arguments.Length >= 3) mode = WScript.Arguments(2);
+			var password = ""; if (WScript.Arguments.Length >= 4) password = WScript.Arguments(3);
+			
+			command = command.replace(/%project%/, project);
+			command = command.replace(/%mode%/, mode);
+			command = command.replace(/%password%/, password);
+	
+			WScript.StdOut.WriteLine("Build: " + project + " (" + mode + ")");
+			
+			var oShell = WScript.CreateObject("WScript.Shell")
+			var oExec = oShell.Exec(command)
+			
+			gStdOut = "";
+			gStdErr = "";
+			
+			while (oExec.Status == 0)
+			{
+			    ReadFromScriptExec(oExec);
+			    WScript.Sleep(100);
+			}
+		    ReadFromScriptExec(oExec);
+		    
+			WScript.StdOut.WriteLine(gStdOut);
+			WScript.StdOut.WriteLine(gStdErr);
+		}
+	</script>
+</job>
+

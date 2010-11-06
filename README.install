@@ -1,0 +1,11 @@
+Untar the release in the target installation area 
+eg.
+ tar xvzf mugsy-x86-64-vXrX.tgz /path/to/install_dir/
+
+Edit MUGSY_INSTALL in mugsyenv.sh and set to absolute path of the
+installation directory
+
+In bash, run 
+ source mugsyenv.sh
+
+

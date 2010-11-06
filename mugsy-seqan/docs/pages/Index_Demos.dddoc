@@ -1,0 +1,4 @@
+.Indexpage.Demo:
+..description:
+This section contains small example programs that demonstrate the use of SeqAn.
+See @Page.Installation|here@ for instructions how to compile these examples.

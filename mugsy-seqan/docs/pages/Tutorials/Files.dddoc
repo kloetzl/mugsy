@@ -1,0 +1,102 @@
+.Page.Files:
+..XXXcat:Tutorials
+..summary:File Input/Output.
+
+.Page.Files.description:
+..contents
+
+
+
+..section:# Raw Data
+..text:SeqAn supports the input and output of files in different @Tag.File Format|file formats@.
+The most simple file format is $Raw$ that is used to load a file "as is" into a string or vice versa.
+..code:
+//Loading.
+::std::fstream fstrm;
+fstrm.open("input.txt", ::std::ios_base::in | ::std::ios_base::binary);
+
+String<char> str;
+read(fstrm, str, Raw());
+::std::cout << str << ::std::endl;
+fstrm.close();
+
+..text:In this example, the tag $Raw()$ can also be omitted, since $Raw$ is the default file format.
+Instead of using @Function.read@ and @Function.write@ to read and write raw data, one can also use the operators $<<$ and $>>$.
+..text:
+Files can either be instances of a @Adaption.std::iostream|standard stream class@,
+or a C-style stream (i.e. $FILE *$) or a @Class.File|SeqAn $File$ object@ (see below).
+Note that the files should always be opened in binary mode.
+
+
+..section:# File Formats for Bioinformatics
+..text:Apart from $Raw$, SeqAn offers @Tag.File Format|other file formats@ relevant in bioinformatics such as $Fasta$, $EMBL$, or $Genbank$.
+These file formats consist of one or more data records. 
+Multiple records in a file can be loaded by iteratively calling the function @Function.read@.
+..code:
+::std::fstream fstrm;
+fstrm.open("est.fasta", ::std::ios_base::in | ::std::ios_base::binary);
+String<Dna> est;
+while (! fstrm.eof()) {
+ read(fstrm, est, Fasta());
+ ::std::cout << est << ::std::endl;
+}
+
+..text:
+The function @Function.goNext@ skips the current record and proceeds to the next record.
+..text:
+Each record contains a piece of data (i.e. a sequence or an alignment) and optional some additional metadata.
+One can load these metadata before loading the actual data using @Function.readMeta@. 
+The function fills a string with the unparsed metadata.
+..code:
+::std::fstream fstrm;
+fstrm.open("est.fasta", ::std::ios_base::in | ::std::ios_base::binary);
+String<Dna> est;
+String<char> meta;
+while (! fstrm.eof())
+{
+ readMeta(fstrm, meta, Fasta());
+ ::std::cout << meta << ::std::endl;
+ read(fstrm, est, Fasta());
+ ::std::cout << est << ::std::endl;
+}
+
+
+..text:
+@Function.write@ is used to write a record into a file. 
+Depending on the file format, a suitable metadata string must be passed to @Function.write@.
+..code:
+FILE * cstrm = fopen("genomic_data.fa", "w");
+write(cstrm, "acgt", "the metadata", Fasta());
+fclose(cstrm);
+..text:This code creates the following file "genomic_data.fa".
+..code:
+>the metadata
+ACGT
+
+
+..section:# File Reader Strings
+..text:The easiest way for a read-only access of sequence data stored in a file is a @Spec.File Reader String|file reader string@.
+A file reader string implements the @Concept.Container|container concept@, i.e. it implements common functions like @Function.length@ or @Function.begin@.
+It has minimal memory consumption, because each part of the sequence data is not loaded before it is needed.
+..code:
+String<Dna, FileReader<Fasta> > fr("ests.fa");
+//Print the length of the first sequence.
+::std::cout << length(fr);                            
+
+..text:
+The constructor of the file reader string can also take a file from which the sequences will be loaded.
+For example, the following code will read the second sequence in the file:
+..code:
+FILE * cstrm = fopen("est.fasta", "r");
+goNext(cstrm, Fasta());
+//Read the meta data of the second record.
+String<char> meta_data;
+readMeta(cstrm, meta_data, Fasta());
+::std::cout << meta_data << ::std::endl;  
+//Read the sequence data of the second record.
+String<Dna, FileReader<Fasta> > fr(cstrm);
+::std::cout << fr << ::std::endl;
+fclose(cstrm);
+
+
+

@@ -1,0 +1,24 @@
+<html>
+<head>
+<title>SeqAn Multitesting</title>
+<link rel="stylesheet" type="text/css" href="style.css" />
+<script>
+function reloadPage()
+{
+    location.reload(true);
+    setTimeout("reloadPage();", 2000);
+}
+setTimeout("reloadPage();", 2000);
+
+var DATA = '';
+</script>
+<script src="data_old.js"></script>
+<script src="data.js"></script>
+</head>
+<body>
+<script>
+    if (DATA == '') location.reload(true);
+    document.write(DATA);
+</script>
+</body>
+</html>

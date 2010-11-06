@@ -1,0 +1,33 @@
+To build, run make all
+
+synchain-mugsy
+----------------
+LCB identification code that require the Boost library
+
+MUMmer3.20
+----------
+A copy of the original sources from http://mummer.sourceforge.net. 
+
+Modifications include delta-filter -b for reporting duplications and
+new utility delta2maf
+
+mugsy-seqan
+----------------
+A copy of the original sources from the Seqan library and
+build environment that is required to build mugsyWGA
+
+The orginal sources were obtained from here http://www.seqan.de/
+
+The new sources for mugsyWGA are in projects/library/apps/mugsy
+
+Additional changes to support reversals include these sources 
+graph_align_tcoffee_msa.h
+graph_align_tcoffee_base.h
+graph_align_tcoffee_io.h
+graph_algorithm_refine_exact_iterative.h
+graph_impl_align.h
+graph_impl_interval_tree.h
+graph_impl_fragment.h
+
+
+

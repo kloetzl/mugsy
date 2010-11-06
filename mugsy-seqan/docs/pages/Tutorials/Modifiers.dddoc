@@ -1,0 +1,175 @@
+.Page.Modifiers:
+..XXXcat:Tutorials
+..summary:Modifiers give a different view to other classes. 
+
+.Page.Modifiers.description:
+..contents
+
+..section:# Overview
+..text:
+Modifiers can be used to change the elements of a container without touching them. For example, someone
+gave you an algorithm that works on 2 arbitrary strings, but you want to use it for the special pair of a string and its
+reverse (left-to-right mirror). The classical approach would be to make a copy of the one string, 
+where all elements are mirrored from left to right and call the algorithm with both strings. With modifiers you
+can create the reverse in O(1) extra memory without copying the original string. This can be handy if the original
+sequence is large.
+
+..text:
+Modifiers implement a certain concept (e.g. @Concept.Container@, @Concept.Iterator@, ...) or class interface (@Class.String@, ...)
+and thus can be used as such. The mirror modifier is already part of SeqAn and implements the 
+class interface of @Class.String@ and can be used in every algorithm that works on strings.
+
+..section:# The Modified String
+..text:
+The @Class.ModifiedString@ is a modifier that implements the @Class.String@ interface and thus can be used like a
+@Class.String@. It has 2 template parameters. The first one specifies a sequence type (e.g. @Class.String@, @Class.Segment@, ...)
+and the second one specifies the modifiers behaviour. That can be @Spec.ModReverse@ for mirroring a string left to right
+or @Spec.ModView@ for applying a function to every single character (like 'C'->'G', 'A'->'T', ...).
+
+..subsection:#.# ModReverse
+..text:
+We begin with the example from the first section. We have a given string:
+..code:String<char> myString = "A man, a plan, a canal-Panama";
+
+..text:
+and want to get the reverse. So we need a @Class.ModifiedString@ specialized with $String<char>$ and @Spec.ModReverse@.
+We create the modifier and link it with $myString$ with:
+..code:ModifiedString< String<char>, ModReverse > myModifier(myString);
+
+..text:
+The result is:
+..code:
+::std::cout << myString << ::std::endl;
+::std::cout << myModifier << ::std::endl;
+..output:
+A man, a plan, a canal-Panama
+amanaP-lanac a ,nalp a ,nam A
+
+..text:
+To verify that we didn't copy $myString$, we replace an infix of the original string and see that, as a side effect, the modified string has also changed:
+..code:
+infix(myString, 9, 9) = "master ";
+
+::std::cout << myString << ::std::endl;
+::std::cout << myModifier << ::std::endl;
+..output:
+A man, a master plan, a canal-Panama
+amanaP-lanac a ,nalp retsam a ,nam A
+
+..text:
+@Demo.ModReverse|Click here@ to see the complete source code of the @Spec.ModReverse@ example.
+
+..subsection:#.# ModView
+..text:
+Another specialization of the @Class.ModifiedString@ is the @Spec.ModView@ modifier. Assume we need all characters of
+$myString$ to be in upper case without copying $myString$. In SeqAn you first create a functor (a STL unary function)
+which converts a character to its upper-case character:
+
+..code:
+struct MyFunctor : public ::std::unary_function<char,char> 
+{
+    inline char operator()(char x) const 
+    {
+        if (('a' <= x) && (x <= 'z')) return (x + ('A' - 'a'));
+        return x; 
+    }
+};
+..text:
+and then create a @Class.ModifiedString@ specialized with $ModView<MyFunctor>$:
+..code:ModifiedString< String<char>, ModView<MyFunctor> > myModifier(myString);
+
+..text:
+The result is:
+..code:
+::std::cout << myString << ::std::endl;
+::std::cout << myModifier << ::std::endl;
+..output:
+A man, a plan, a canal-Panama
+A MAN, A PLAN, A CANAL-PANAMA
+
+..text:
+The upper-case functor and some other predefined functors are part of SeqAn (in seqan/modifier/modifier_functors.h) already.
+The following functors can be used as an argument of @Spec.ModView@:
+..tableheader:Functor|Description
+..table:$FunctorUpcase<TValue>$|Converts each character of type $TValue$ to its upper-case character
+..table:$FunctorLowcase<TValue>$|Converts each character to type $TValue$ to its lower-case character
+..table:$FunctorComplement<Dna>$|Converts each nucleotide to its complementary nucleotide
+..table:$FunctorComplement<Dna5>$|The same for the @Spec.Dna5@ alphabet
+..table:$FunctorConvert<TInValue,TOutValue>$|Converts the type of each character from $TInValue$ to $TOutValue$
+
+..text:
+So instead of defining your own functor we could have used a predefined one:
+..code:ModifiedString< String<char>, ModView<FunctorUpcase<char> > > myModifier(myString);
+
+..text:
+@Demo.ModView|Click here@ to see the complete source code of the @Spec.ModView@ example.
+
+..subsection:#.# Shortcuts
+..text:
+For some common usage modifiers you can use the following shortcuts:
+..tableheader:Shortcut|Substitution
+..table:$ModComplementDna$|$ModView< FunctorComplement<Dna> >$
+..table:$ModComplementDna5$|$ModView< FunctorComplement<Dna5> >$
+..table:$DnaStringComplement$|$ModifiedString< DnaString, ModComplementDna >$
+..table:$Dna5StringComplement$|$ModifiedString< Dna5String, ModComplementDna5 >$
+..table:$DnaStringReverse$|$ModifiedString< DnaString, ModReverse >$
+..table:$Dna5StringReverse$|$ModifiedString< Dna5String, ModReverse >$
+..table:$DnaStringReverseComplement$|$ModifiedString< ModifiedString< DnaString, ModComplementDna >, ModReverse >$
+..table:$Dna5StringReverseComplement$|$ModifiedString< ModifiedString< Dna5String, ModComplementDna5 >, ModReverse >$
+
+..section:# The Modified Iterator
+..text:
+We have seen how a @Class.ModifiedString@ can be used to modify strings without touching or copying original data.
+The same can be done with iterators. The @Class.ModifiedIterator@ implements the @Concept.Iterator@ concept and
+thus can be used in every algorithm or data structure that expects an iterator. In fact, we have already used
+the @Class.ModifiedIterator@ unknowingly in the examples above, as in our cases the @Class.ModifiedString@ returns 
+a corresponding @Class.ModifiedIterator@ via the @Metafunction.Iterator@ meta-function. The main work is done in
+the @Class.ModifiedIterator@, whereas the @Class.ModifiedString@ only overloads the @Function.begin@ and @Function.end@.
+Normally, you are going to use the @Class.ModifiedString@ and maybe the result of its @Metafunction.Iterator@ meta-function
+instead of a @Class.ModifiedIterator@ directly.
+
+..section:# Nested Modifiers
+..text:
+As modifiers implement a certain concept and depend on classes of this concept, they can be chained to
+create a new modifier. We have seen how the @Class.ModifiedString@ specialized with @Spec.ModReverse@ and @Spec.ModView@
+can be used. Now we want to combine them to create a modifier for the reverse complement of a @Spec.Dna@ string.
+We begin with the original string:
+..code:String<Dna> myString = "attacgg";
+
+..text:
+Then we define the modifier that complements a @Spec.Dna@ string:
+..code:typedef ModifiedString<String<Dna>, ModComplementDna>   TMyComplement;
+
+..text:
+This modifier now should be reversed from left to right:
+..code:typedef ModifiedString<TMyComplement, ModReverse>       TMyReverseComplement;
+
+..text:The original string can be given via @Function.setValue@ or to the constructor.
+..code:TMyReverseComplement myReverseComplement(myString);
+
+..text:
+The result is:
+..code:
+::std::cout << myString << ::std::endl;
+::std::cout << myReverseComplement << ::std::endl;
+
+infix(myString, 1, 1) = "cgt";
+
+::std::cout << myString << ::std::endl;
+::std::cout << myReverseComplement << ::std::endl;
+
+..output:
+ATTACGG
+CCGTAAT
+ACGTTTACGG
+CCGTAAACGT
+
+..text:
+Using a predefined shortcut, the whole example could be reduced to:
+..code:
+String<Dna> myString = "attacgg";
+::std::cout << myString << ::std::endl;
+::std::cout << DnaStringReverseComplement(myString) << ::std::endl;
+
+..text:
+@Demo.Nested Modifiers|Click here@ to see the complete source code of the nested modifiers example.

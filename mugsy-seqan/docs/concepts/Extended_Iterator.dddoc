@@ -1,0 +1,10 @@
+.Concept.Rooted Iterator:
+..summary:Iterator that knows its container.
+..baseconcept:Concept.Iterator
+
+
+
+.Function.container.concept:Concept.Rooted Iterator
+.Function.position.concept:Concept.Rooted Iterator
+
+

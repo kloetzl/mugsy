@@ -1,0 +1,9 @@
+example1.afg: Single contig, clipped reads, no mate pairs
+example2.afg: Single contig, no clipped reads, mate pairs
+example3.afg: Multiple contigs, clipped reads, mate pairs
+
+
+Viewing:
+${AMOS}/bin/bank-transact -m example1.afg -b test.bnk -c
+${AMOS}/bin/hawkeye test.bnk/
+rm -rf test.bnk/

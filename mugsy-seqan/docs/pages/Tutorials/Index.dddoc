@@ -1,0 +1,290 @@
+.Page.Indices:
+..XXXcat:Tutorials
+..summary:Substring indices in SeqAn.
+
+..description:
+...contents
+...image:indices
+...text:
+A substring index is a datatype which allows to seek efficiently for all occurrences of a pattern 
+in a string or a set of strings. 
+Substring indices are very efficient for the exact string matching problem, i.e. finding all exact occurrences of a pattern in a text or a text collection.
+Instead of searching through the text in O(n) like online-search algorithms do, a substring index looks up the pattern in sublinear time o(n).
+Substring indices are full-text indices, i.e. they handle all substrings of a text in contrast to inverted files or signature files, which need word delimiters.
+
+SeqAn contains data structures to create, hold and use substring indices.
+Based on a unified concept, SeqAn offers several concrete implementations (e.g. enhanced suffix array, lazy suffix tree,
+q-gram index, nested q-gram index, etc.) defined as specializations of @Class.Index@.
+
+The unified concept allows every index (except the simple q-gram index) to be accessed just like a suffix tree independently of its concrete implementation.
+To access this (virtual) suffix tree SeqAn offers various @Concept.Iterator.iterators@.
+
+
+
+...section:# Create an index
+
+...text:
+A substring index is a specialization of the generic class @Class.Index@ which expects 2 arguments (the second is optional).
+The first template argument is the type of the data structure the index should be built on.
+In the following, we denote this type by $TText$.
+For example, this could be @Class.String.String<char>@ to create a substring index on a string of characters:
+...code:Index< String<char> > myIndex;
+...text: 
+or @Class.StringSet.StringSet<String<char> >@ to create an index on a set of character strings:
+...code:Index< StringSet<String<char> > > myIndex;
+
+...text:
+The second template argument of the @Class.Index@ class specifies the concrete implementation.
+In the following, we denote this type by $TSpec$.
+By default, this is @Spec.Index_ESA.Index_ESA<>@ to use an enhanced suffix array. 
+So, our first code example could also be written as:
+...code:Index< String<char>, Index_ESA<> > myIndex;
+
+...text:
+After we have seen how to instantiate an index object, we need to know how to assign a sequence the index should be built on.
+This can be done with the function @Function.indexText@ which returns a reference to a $TText$ object stored in the index or
+directly with the index constructor:
+...code:
+// this ...
+Index< String<char> > myIndex;
+indexText(myIndex) = "tobeornottobe";
+	
+// ... could also be written as
+Index< String<char> > myIndex("tobeornottobe");
+
+...text:
+
+
+
+...section:# How to find a pattern
+
+...text:
+To find all occurrences of a pattern in an indexed @Class.String@ or a @Class.StringSet@, SeqAn provides the @Class.Finder@ class (see @Page.Searching.searching tutorial@),
+which is also specialized for @Class.Index.indices@.
+The following example shows, how to use the @Class.Finder@ class specialized for our index to search the pattern $"be"$.
+...code:
+Finder< Index<String<char> > > myFinder(myIndex);
+while (find(myFinder, "be"))
+	::std::cout << position(myFinder) << " ";
+...output:11 2
+
+...text:
+The finder object $myFinder$ was created with a reference to $myIndex$.
+The function @Function.find@ searches the next occurence of $"be"$ and returns $true$ if an occurrence was found and $false$ after all occurrences have been passed.
+
+The positition of an occurrence in the text is returned by the function @Function.position@ called with the @Class.Finder@ object.
+
+Please note that in contrast to online-search algorithms (see @Page.Searching.searching tutorial@) the returned occurrence positions are not ascending.
+As you can see in the code example above, the pattern $"be"$ was passed directly to the @Function.find@ function.
+This is a shortcut for indices and could be also written in a longer way (already known from the @Page.Searching.searching tutorial@):
+...code:
+Finder< Index<String<char> > > myFinder(myIndex);
+Pattern< String<char> >        myPattern("be");
+while (find(myFinder, myPattern))
+	::std::cout << position(myFinder) << " ";
+...output:11 2
+
+...text:
+@Demo.Index Finder|Click here@ for an example of a @Class.Finder@ for an @Spec.Index_ESA.enhanced suffix array@
+and for a @Spec.Index_QGram.q-gram index@.
+
+
+...section:# Suffix trees
+...text:
+We consider an alphabet \Sigma and a sentinel character $$ that is smaller than every character of \Sigma.
+A suffix tree of a given non-empty string $s$ over \Sigma is a directed tree whose edges are labeled with non-empty substrings of $s$$$ with the following properties:
+...text:
+1. Each outgoing edge begins with a different letter and the outdegree of an internal node is greater than 1.
+...text:
+2. Each suffix of $s$$$ is the concatenation of edges from the root to a leaf node.
+...text:
+3. Each path from the root to a leaf node is a suffix of $s$$$.
+...text:
+
+The following figure shows the suffix tree of the string $s="mississippi"$ (suffix nodes are shaded):
+...image:streeSentinel|Suffix tree of $mississippi$
+
+...text:
+Many suffix tree construction algorithms expect $$ to be part of the string alphabet which is undesirable for small bit-compressible alphabets (e.g. DNA).
+In SeqAn there is no need to introduce a $$. We relax suffix tree criteria 2. and consider the relaxed suffix tree that arises from the suffix tree of $s$ by removing the $$ character and all empty edges.
+In the following, we only consider relaxed suffix trees and simply call them suffix trees.
+In that tree a suffix can end in an inner node as you can see in the next figure (suffix $i$):
+...image:streeNoSentinel|Relaxed suffix tree of $mississippi$
+
+...subsection:#.# How to traverse a suffix tree
+...text:
+In SeqAn a suffix tree can be accessed with special @Spec.VSTree Iterator.suffix tree iterators@, which differ in the way the tree nodes are traversed.
+For a lot of sequence algorithms it is neccessary to do a full @http://en.wikipedia.org/wiki/Depth-first_search|depth-first search@ (dfs) over all suffix tree nodes beginning either in the root (preorder dfs) or in a leaf node (postorder dfs).
+A preorder traversal halts in a node when visiting it for the first time whereas a postorder traversal halts when visiting a node for the last time.
+The following two figures give an example in which order the tree nodes are visited:
+
+...image:streePreorder|Preorder dfs traversal|streePostorder|Postorder dfs traversal
+
+...text:
+A postorder traversal, also known as bottom-up traversal, can be realized with the @Spec.BottomUp Iterator@. 
+This iterator starts in the left-most (lexicographically smallest) leaf and provides the functions @Function.goNext@, @Function.atEnd@, and @Function.goBegin@ 
+to proceed with the next node in postorder, to test for having been visiting all nodes, and to go back to the first node of the traversal.
+The @Spec.BottomUp Iterator@ can be optained by the @Metafunction.Iterator@ meta-function called with an @Class.Index@ type and the $BottomUp$ specialization type.
+The following example shows how our index can be traversed as a suffix tree with $myIterator$ in a bottom-up fashion:
+
+...code:
+// postorder dfs
+Iterator< Index<String<char> >, BottomUp<> >::Type myIterator(myIndex);
+for (; !atEnd(myIterator); goNext(myIterator)) 
+	// do something with myIterator
+
+...text:
+Another kind of traversing the suffix tree provides the light-weight @Spec.TopDown Iterator@. 
+Starting in the root node the iterator can @Function.goDown@ the left-most edge, the edge beginning with a certain character or the path of a certain string.
+@Function.goRight@ can be used to go to the right (lexicographically larger) sibling of the current node.
+These functions return a $bool$ which indicates whether the iterator could successfully be moved.
+To visit the children of the root node in lexicographical ascending order you could write:
+
+...code:
+Iterator< Index<String<char> >, TopDown<> >::Type myIterator(myIndex);
+goDown(myIterator);
+while (goRight(myIterator)) 
+	// do something with myIterator
+
+...text:
+To go back to upper nodes you can either save copies of the @Spec.TopDown Iterator@ or use the heavier @Spec.TopDownHistory Iterator@ which stores the way back to the root and can @Function.goUp@.
+This is a specialization of the @Spec.TopDown Iterator@ and can be instantiated with $Iterator< Index<String<char> >, TopDown<ParentLinks<> > >::Type myIterator(myIndex);$.
+
+As this iterator can randomly walk through the suffix tree it can easily be used to do a preorder or postorder dfs.
+Therefore this iterator also implements the functions @Function.goNext@ and @Function.atEnd@.
+The order of the dfs traversal can be specified with an optional template argument of $ParentLinks<..>$ which can be @Tag.Preorder@ (default) \ldots
+
+...code:
+// preorder dfs
+Iterator< Index<String<char> >, TopDown<ParentLinks<Preorder> > >::Type myIterator(myIndex);
+for (; !atEnd(myIterator); goNext(myIterator)) 
+	// do something with myIterator
+
+...text: \ldots or @Tag.Postorder@. As top-down iterators starts in the root node, the iterator must manually be moved down to the first postorder node which is the left-most leaf:
+
+...code:
+// postorder dfs
+Iterator< Index<String<char> >, TopDown<ParentLinks<Postorder> > >::Type myIterator(myIndex);
+while (goDown(myIterator));
+for (; !atEnd(myIterator); goNext(myIterator)) 
+	// do something with myIterator
+
+...note:
+A relaxed suffix tree is a suffix tree after removing the $$ characters and empty edges.
+For some bottom-up algorithms it would be better not to remove empty edges and to have a one-to-one relationship between leaves and suffices.
+In that cases you can use the tags @Tag.PreorderEmptyEdges@ or @Tag.PostorderEmptyEdges@ instead of @Tag.Preorder@ or @Tag.Postorder@ or
+@Tag.EmptyEdges@ for the @Spec.TopDown Iterator@.
+
+...subsection:#.# How to access a suffix tree
+...text:
+In the previous subsection we have seen how to walk through a suffix tree. 
+We now want to know what can be done with a suffix tree iterator.
+As all iterators are specializations of the general @Spec.VSTree Iterator@ class, they inherit all of its functions.
+There are various functions to access the node the iterator points at, so we concentrate on the most important ones.
+
+...tableheader:Function|Description
+...table:@Function.representative@|returns the substring that represents the current node, i.e. the concatenation of substrings on the path from the root to the current node
+...table:@Function.getOccurrence@|returns a position where the representative occurs in the text
+...table:@Function.getOccurrences@|returns a string of all positions where the representative occurs in the text
+...table:@Function.isRightTerminal@|tests if the representative is a suffix in the text (corresponds to the shaded nodes in the figures above)
+...table:@Function.Index#isLeaf@|tests if the current node is a tree leaf
+...table:@Function.parentEdgeLabel@|returns the substring that represents the edge from the current node to its parent (only @Spec.TopDownHistory Iterator@)
+
+...note:
+There is a difference between the functions @Function.Index#isLeaf@ and @Function.isRightTerminal@.
+In a relaxed suffix tree a leaf is always a suffix, but not vice versa, as there can be internal nodes a suffix ends in.
+For them @Function.Index#isLeaf@ returns false and @Function.isRightTerminal@ returns true.
+
+
+...subsection:#.# Additional iterators
+...text:
+By now, we know the following iterators (n=text size, \sigma=alphabet size, d=tree depth):
+...tableheader:Iterator specialization|Description|Space|Index tables
+...table:@Spec.BottomUp Iterator@|postorder dfs|O(d)|SA, LCP
+...table:@Spec.TopDown Iterator@|can go down and go right|O(1)|SA, LCP, ChildTab
+...table:@Spec.TopDownHistory Iterator@|can also go up, preorder/postorder dfs|O(d)|SA, LCP, ChildTab
+
+...text:
+Besides the iterators described above, there are some application-specific iterators in SeqAn:
+...tableheader:Iterator specialization|Description|Space|Index tables
+...table:@Spec.MaxRepeats Iterator@|maximal repeats|O(n)|SA, LCP, BWT
+...table:@Spec.SuperMaxRepeats Iterator@|supermaximal repeats|O(d+\sigma)|SA, LCP, ChildTab, BWT
+...table:@Spec.SuperMaxRepeatsFast Iterator@|supermaximal repeats (optimized for enh. suffix arrays)|O(\sigma)|SA, LCP, BWT
+...table:@Spec.MUMs Iterator@|maximal unique matches|O(d)|SA, LCP, BWT
+...table:@Spec.MultiMEMs Iterator@|multiple maximal exact matches (w.i.p.)|O(n)|SA, LCP, BWT
+
+...text:
+Given a string $s$ a repeat is a substring $r$ that occurs at 2 different positions $i$ and $j$ in $s$.
+The repeat can also be identified by the triple $(i,j,|r|)$.
+A maximal repeat is a repeat that cannot be extended to the left or to the right, i.e. $s[i-1]\neqs[j-1]$ and $s[i+|r|]\neqs[j+|r|]$.
+A supermaximal repeat $r$ is a maximal repeat that is not part of another repeat.
+
+...text:
+Given a set of strings $s1$, \ldots, $sm$ a MultiMEM (multiple maximal exact match) is a substring $r$ that occurs in each sequence $si$ 
+at least once and cannot be extended to the left or to the right right.
+A MUM (maximal unique match) is a MultiMEM that occurs exactly once in each sequence.
+...text:
+The following examples demonstrate the usage of these iterators:
+...tableheader:Example
+...table:@Demo.Maximal Unique Matches@
+...table:@Demo.Supermaximal Repeats@
+...table:@Demo.Maximal Repeats@
+
+
+
+...section:# Multiple sequences
+...text:
+Section 1 briefly described how an index of a set of strings can be instantiated.
+Instead of creating an @Class.Index@ of a @Class.String@ you create one of a @Class.StringSet@.
+A character position of this string set can be one of the following:
+...text:
+1. A local position (default), i.e. @Class.Pair@ $(seqNo, seqOfs)$ where $seqNo$ identifies the string within the stringset 
+and the $seqOfs$ identifies the position within this string.
+...text:
+2. A global position, i.e. single integer value between 0 and the sum of string lengths minus 1 (global position).
+This integer is the position in the gapless concatenation of all strings in the @Class.StringSet@ to a single string.
+
+...text:
+The meta-function @Metafunction.SAValue@ determines, which position type (local or global) will be used for internal 
+index tables (suffix array, q-gram array) and what type of position is returned by function like @Function.getOccurrence@
+or @Function.position@ of a @Class.Finder@. @Metafunction.SAValue@ returns a @Class.Pair@=local position by default,
+but could be specialized to return an integer type=global position for some applications.
+If you want to write algorithms for both variants you should use the functions @Function.posLocalize@, @Function.posGlobalize@, @Function.getSeqNo@ and @Function.getSeqOffset@.
+
+To search in multiple strings the @Class.Finder@ example from above can be modified to:
+
+...code:
+// set StringSet
+StringSet< String<char> > mySet;
+resize(mySet, 3);
+mySet[0] = "tobeornottobe";
+mySet[1] = "thebeeonthecomb";
+mySet[2] = "beingjohnmalkovich";
+
+// find "be" in Index of StringSet
+Index< StringSet<String<char> > > myIndex(mySet);
+Finder< Index<StringSet<String<char> > > > myFinder(myIndex);
+while (find(myFinder, "be"))
+	::std::cout << position(myFinder) << "  ";
+	
+...output:< 0 , 11 >  < 1 , 3 >  < 2 , 0 >  < 0 , 2 >
+
+...text:
+As $TText$ is a @Class.StringSet@, $position(finder)$ returns a @Class.Pair@ $(seqNo,seqOfs)$ where $seqNo$ is the number and $seqOfs$ the local position of the sequence the pattern occurs at.
+@Demo.Index Finder StringSet|Click here@ to see the complete source code of this example.
+
+
+
+...section:# Index implementation details
+
+...text:
+The following index implementations are currently part of SeqAn:
+...tableheader:Index specialization|Implementation|Reference
+...table:@Spec.Index_ESA@|Enhanced suffix array|Kurtz et al., "Replacing Suffix Trees with Enhanced Suffix Arrays", 2004
+...table:Index_Wotd|Lazy suffix tree (work in progress)|Giegerich et al., "Efficient Implementation of Lazy Suffix Trees", 2003
+...table:@Spec.Index_QGram@|Simple q-gram index (aka k-mer index)|
+...table:Index_QGram_Nested|Nested q-gram index (work in progress)|
+
+...text:
+A simple example for specializing a suffix array based index and a q-gram index for the same pattern matching problem can be found in the @Demo.Index Finder@ demo.
+

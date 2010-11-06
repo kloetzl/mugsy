@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="Windows-1252"?>
+<VisualStudioProject
+	ProjectType="Visual C++"
+	Version="7.10"
+	Name="SeqAn"
+	ProjectGUID="{7FF7C127-D59B-4681-9897-AF51E40241FC}"
+	RootNamespace="SeqAn"
+	Keyword="MakeFileProj">
+	<Platforms>
+		<Platform
+			Name="Win32"/>
+	</Platforms>
+	<Configurations>
+####PLATZHALTER1####
+	</Configurations>
+	<References>
+	</References>
+	<Files>
+####PLATZHALTER2####
+	</Files>
+	<Globals>
+	</Globals>
+</VisualStudioProject>

@@ -1,0 +1,19 @@
+.Concept.Iterator:
+..summary:Object that iterates through container.
+
+
+.Metafunction.Value.concept:Concept.Iterator
+.Metafunction.GetValue.concept:Concept.Iterator
+.Metafunction.Reference.concept:Concept.Iterator
+.Metafunction.Size.concept:Concept.Iterator
+.Metafunction.Difference.concept:Concept.Iterator
+
+.Function.assign.concept:Concept.Iterator
+
+.Function.value.concept:Concept.Iterator
+.Function.getValue.concept:Concept.Iterator
+.Function.assignValue.concept:Concept.Iterator
+.Function.moveValue.concept:Concept.Iterator
+.Function.goNext.concept:Concept.Iterator
+
+
