@@ -39,7 +39,13 @@ my $twig = new XML::Twig(
 			     my $seqname  = $elt->parent('Sequence')->{'att'}->{'id'};
 			     my $featname = $elt->{'att'}->{'id'};
 			     my $class = $elt->{'att'}->{'class'};
-			     my $complement = $elt->{'att'}->{'complement'};
+			     my $complement = $iloc->{'att'}->{'complement'};
+			     if ($complement eq '1'){
+				 $complement = '-';
+			     }
+			     if ($complement eq '0'){
+				 $complement = '+';
+			     }
 			     my($fmin,$fmax) = ($iloc->{'att'}->{'startpos'},$iloc->{'att'}->{'endpos'});
 			     if(exists $mapping->{$seqname}){
 				 $fmin = $fmin+$mapping->{$seqname}->[1];
