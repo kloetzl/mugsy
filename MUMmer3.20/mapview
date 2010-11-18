@@ -1,9 +1,9 @@
 #!/usr/local/bin/perl
 
-use lib "/tmp/mugsy_trunk/MUMmer3.20/scripts";
+use lib "$ENV{MUGSY_INSTALL}/MUMmer3.20/scripts";
 use Foundation;
 
-my $SCRIPT_DIR = "/tmp/mugsy_trunk/MUMmer3.20/scripts";
+my $SCRIPT_DIR = "$ENV{MUGSY_INSTALL}/MUMmer3.20/scripts";
 
 
 my $VERSION_INFO = q~

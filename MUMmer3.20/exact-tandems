@@ -6,8 +6,8 @@
 set filename = $1
 set matchlen = $2
 
-set bindir = /tmp/mugsy_trunk/MUMmer3.20
-set scriptdir = /tmp/mugsy_trunk/MUMmer3.20/scripts
+set bindir = $ENV{MUGSY_INSTALL}/MUMmer3.20
+set scriptdir = $ENV{MUGSY_INSTALL}/MUMmer3.20/scripts
 
 if  ($filename == '' || $matchlen == '')  then
     echo "USAGE:  $0 <file> <min-match-len>"

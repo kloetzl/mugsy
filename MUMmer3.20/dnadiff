@@ -9,13 +9,13 @@
 #
 #-------------------------------------------------------------------------------
 
-use lib "/tmp/mugsy_trunk/MUMmer3.20/scripts";
+use lib "$ENV{MUGSY_INSTALL}/MUMmer3.20/scripts";
 use Foundation;
 use File::Spec::Functions;
 use strict;
 
-my $BIN_DIR = "/tmp/mugsy_trunk/MUMmer3.20";
-my $SCRIPT_DIR = "/tmp/mugsy_trunk/MUMmer3.20/scripts";
+my $BIN_DIR = "$ENV{MUGSY_INSTALL}/MUMmer3.20";
+my $SCRIPT_DIR = "$ENV{MUGSY_INSTALL}/MUMmer3.20/scripts";
 
 my $VERSION_INFO = q~
 DNAdiff version 1.00

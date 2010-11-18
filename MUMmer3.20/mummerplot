@@ -16,13 +16,13 @@
 # 
 ################################################################################
 
-use lib "/tmp/mugsy_trunk/MUMmer3.20/scripts";
+use lib "$ENV{MUGSY_INSTALL}/MUMmer3.20/scripts";
 use Foundation;
 use strict;
 use IO::Socket;
 
-my $BIN_DIR = "/tmp/mugsy_trunk/MUMmer3.20";
-my $SCRIPT_DIR = "/tmp/mugsy_trunk/MUMmer3.20/scripts";
+my $BIN_DIR = "$ENV{MUGSY_INSTALL}/MUMmer3.20";
+my $SCRIPT_DIR = "$ENV{MUGSY_INSTALL}/MUMmer3.20/scripts";
 
 
 #================================================================= Globals ====#

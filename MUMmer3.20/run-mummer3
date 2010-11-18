@@ -13,7 +13,7 @@ set ref = $1
 set qry = $2
 set pfx = $3
 
-set bindir = /tmp/mugsy_trunk/MUMmer3.20
+set bindir = $ENV{MUGSY_INSTALL}/MUMmer3.20
 
 if($ref == '' || $qry == '' || $pfx == '') then
     echo "USAGE: $0 <fasta reference> <multi-fasta query> <prefix>"
