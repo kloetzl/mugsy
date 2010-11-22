@@ -1,0 +1,14 @@
+Sam Angiuoli <angiuoli@cs.umd.edu>
+
+Mugsy utilizes Seqan 1.2 (Doring et al. BMC Bioinformatics. 2008) and
+MUMmer 3.20 (Kurtz, S et al. Genome Biology. 2004). The version of
+these sources with modifications used for Mugsy and respective license
+and copyright files are available in SVN at http://mugsy.sf.net.
+
+
+Links
+Mugsy: http://mugsy.sf.net
+Seqan: http://www.seqan.de
+Mummer: http://mummer.sourceforge.net
+
+November 2010
