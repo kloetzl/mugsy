@@ -128,21 +128,17 @@ angiuoli@cs.umd.edu
 
 use strict;
 use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
-use lib "$ENV{'MUGSY_INSTALL'}/../../trees";
-use lib "$ENV{'MUGSY_INSTALL'}/trees";
-use lib "/home/sangiuoli/perl/lib64/perl5/site_perl/5.8.8/x86_64-linux-thread-multi";
-use lib "/usr/local/projects/angiuoli/developer/sangiuoli/trees";
-use lib 'trees';
-use lib '../../trees';
 use File::Basename;
 use Pod::Usage;
 use POSIX;
-eval{
-    require TreeParse;
-};
-if (! $@){
-    TreeParse->import();
-}
+
+#Only needed for TBA evaluation
+#eval{
+#    require TreeParse;
+#};
+#if (! $@){
+#    TreeParse->import();
+#}
 
 my %options;
 my $results = GetOptions (\%options, 
@@ -242,6 +238,8 @@ my $musclecmd = "$muscleinstall/muscle";
 #because of assumptions made by some downstream parsers.
 #Check for problem characters in -prefix and report errors
 my $problemchars = "\.\?\-";
+#FASTA headers must not contain
+my $fastaproblemchars = "\:\-";
 
 if(defined $options{'directory'}){
     if(! -d "$options{'directory'}"){
@@ -727,9 +725,9 @@ if($options{'plot'}){
 	print STDERR "Alignment and synteny plot (gnuplot format): $absprefix.$genomename.plot.gp\n";
     }
 }
-if(!exists $options{'refine'}){
-    print $logfh "Iterative refinement realigns each region by running a second iteration of Mugsy and can sometimes improve the alignment. To run a second iteration and produce an output file $absprefix.refined.maf:\n $mugsywgacmd --outfile $absprefix --seq $allfsafile --aln $pwfasta --distance $options{'distance'} --minlength $options{'minlength'} --refine true --infile $absprefix.maf\n";
-}
+#if(!exists $options{'refine'}){
+    #print $logfh "Iterative refinement realigns each region by running a second iteration of Mugsy and can sometimes improve the alignment. To run a second iteration and produce an output file $absprefix.refined.maf:\n $mugsywgacmd --outfile $absprefix --seq $allfsafile --aln $pwfasta --distance $options{'distance'} --minlength $options{'minlength'} --refine true --infile $absprefix.maf\n";
+#}
 
 print STDERR "Finished ",`date`;
 
@@ -949,6 +947,10 @@ sub printFASTA{
     print $logfh "Writing file $fname\n" if($options{'debug'});
 
     open FFILE,">>$fname" or die "Can't open file\n";
+    if($header =~ /([$fastaproblemchars])/){
+	#print STDERR "Invalid FASTA header $header with characters $fastaproblemchars\n";
+	#$header =~ s/([$fastaproblemchars])/_/g;
+    }
     print FFILE ">$header\n";
     foreach my $s (@$seqs){
 	print FFILE $s,"\n";

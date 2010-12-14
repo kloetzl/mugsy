@@ -5905,7 +5905,7 @@ int main(int argc, const char *argv[]){
 
   //Many config options lifted from seqan::tcoffee
   addSection(parser, "Main Options:");
-  addOption(parser, addArgumentText(CommandLineOption("s", "seq", "multi-FASTA file with all input sequences", OptionType::String), "<FASTA Sequence File>"));
+  addOption(parser, addArgumentText(CommandLineOption("s", "seq", "multi-FASTA file with all input sequences. For draft genomes, FASTA headers should be in the form >seqname genomename.", OptionType::String), "<FASTA Sequence File>"));
   addOption(parser, addArgumentText(CommandLineOption("al", "aln", "Library of pairwise alignments. Aligned multi-FASTA format (XMFA)", OptionType::String), "<File1>,<File2>,..."));
   addOption(parser, addArgumentText(CommandLineOption("o", "outfile", "output filename prefix", (int)OptionType::String, "outfile"), "<Filename>"));
   addOption(parser, addArgumentText(CommandLineOption("distance", "distance", "LCB chaining distance", (int)OptionType::String,"1000"), "<String>"));
