@@ -1,5 +1,5 @@
 #Set release name or install directory
-RELEASE_NAME=mugsy_x86-64-v1r2
+RELEASE_NAME=mugsy_x86-64-v1r2.1
 INSTALL_DIR=./${RELEASE_NAME}
 
 
@@ -34,6 +34,9 @@ mugsy_install:
 	install plot.pl ${INSTALL_DIR}
 
 	install -m 644 README ${INSTALL_DIR}
+	install -m 644 CHANGELOG ${INSTALL_DIR}
+	install -m 644 LICENSE ${INSTALL_DIR}
+	install -m 644 LICENSE ${INSTALL_DIR}
 	install -m 644 README.install ${INSTALL_DIR}
 
 mummer_install:

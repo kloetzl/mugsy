@@ -509,7 +509,7 @@ for(my $i=0;$i<@genomenodes;$i++){
     for(my $j=$start;$j<@genomenodes;$j++){
 	if($j!=$i){
 	    my $genomename2 = $genomenodes[$j];#$genomenodes[$j]->attributes->{'nh_label'};
-	    die if(! exists $genome2seqslookup->{$genomename2});
+	    die "Unable to find sequences for genome $genomename2. Check FASTA file names or headers" if(! exists $genome2seqslookup->{$genomename2});
 	    #print STDERR "$genome2seqslookup->{$genomename2}->[0]->[3]\n";
 	    push @queryfiles,"$options{'directory'}/$genomename2";
 	}

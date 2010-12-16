@@ -1,3 +1,5 @@
+The x86-64 tar contains pre-compiled binaries for 64-bit x86 machines running Linux.
+
 Untar the release in the target installation area 
 eg.
  tar xvzf mugsy-x86-64-vXrX.tgz /path/to/install_dir/

@@ -1,4 +1,4 @@
-#!/usr/local/bin/perl
+#!/usr/bin/perl
 
 use lib "$ENV{MUGSY_INSTALL}/MUMmer3.20/scripts";
 use Foundation;
