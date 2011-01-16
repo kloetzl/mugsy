@@ -227,7 +227,7 @@ sub intersect{
 		my ($qmstart,$qmend,$queryorient) = &matchinginterval($alignobj,$qseqname,$qstart,$qend);
 		if(!defined $qmstart || !defined $qmend){
 		    #Error condition
-		    print "WARNING. print unexpected overlapping alignments for query $qstart,$qend\n";
+		    print "WARNING. print unexpected overlapping alignments for query $qstart,$qend on $qseqname\n";
 		    foreach my $align_name2 (@alignments){
 			my($alignobj2,$alignment_bv2,$align_width2) = @{$self->{_alignments}->{$align_name2}};
 			foreach my $alni2 (@$alignobj2){
@@ -981,11 +981,11 @@ sub getAlignmentMatrix {
 	die "Bad sequence $retseqmatrix->[$i]" if(length ($retseqmatrix->[$i])<1);
     }
     #remove same characters
-    #this is really going to really slow in perl this wa
+    #this is really going to really slow in perl this way
     for(my $i=1;$i<@$retmatrix;++$i){ 
 	for(my $j=0;$j<length($retseqmatrix->[$i]);$j++){
-	    my $topchar = substr($retseqmatrix->[0],$j,1);
-	    if(substr($retseqmatrix->[$i],$j,1) ne $topchar){
+	    my $topchar = uc(substr($retseqmatrix->[0],$j,1));
+	    if(uc(substr($retseqmatrix->[$i],$j,1)) ne $topchar){
 		substr($retmatrix->[$i],$j,1) = substr($retseqmatrix->[$i],$j,1);
 	    }
 	    else{
@@ -1093,52 +1093,70 @@ sub printAlignment{
 		    my $stopcodonstr;
 		    my $displaytoken;
 		    
-		    #TODO, REFACTOR into a matrix. this impl doesn't support condons that span row bounds
+		    #TODO, REFACTOR into a matrix. this impl doesn't support codons that span row bounds
 		    #currently only viz start,stop codons at beginning/end of alignment
 		    #print "$r->[2] <= $features->{$r->[0]}->[0] && $r->[3] >= $features->{$r->[0]}->[0]\n";
 		    if($r->[2] <= $features->{$r->[0]}->[0] && $r->[3] >= $features->{$r->[0]}->[0]){
+			my $showfirst = 3;
+			if($ce-$cs<3){
+			    $showfirst = ($ce-$cs);
+			}
 			if($coords[$i]->[2] eq '-'){
+			    $stopcodonstr = substr('***',0,$showfirst);
 			    if($r->[6] eq '-'){
-				$stopcodonstr = 'TAA';#substr($seqmatrix->[$i],$cs-$absstartcol-($COL_WIDTH-3)+($j*$COL_WIDTH),3);
+				#$stopcodonstr = 'TAA';
+				#$stopcodonstr = substr($seqmatrix->[$i],$cs-$absstartcol-($COL_WIDTH-$showfirst)+($j*$COL_WIDTH),$showfirst);
 				$displaytoken .= 'STOP1<--';
 			    }
 			    else{
-				$stopcodonstr = 'CAT';#substr($seqmatrix->[$i],$cs-$absstartcol-($COL_WIDTH-3),3);
+				#$stopcodonstr = 'CAT';
+				#$stopcodonstr = substr($seqmatrix->[$i],$cs-$absstartcol-($COL_WIDTH-$showfirst),$showfirst);
 				$displaytoken .= '<--START1';
 			    }
 			}
 			else{
+			    $startcodonstr = substr('***',0,$showfirst);
 			    if($r->[6] eq '-'){
-				$startcodonstr = 'TTA';#substr($seqmatrix->[$i],$cs-$absstartcol+($j*$COL_WIDTH),3);
+				#$startcodonstr = 'TTA';
+				#$startcodonstr = substr($seqmatrix->[$i],$cs-$absstartcol+($j*$COL_WIDTH),$showfirst);
 				$displaytoken  .= 'STOP2<--';
 			    }
 			    else{
-				$startcodonstr = 'ATG';#substr($seqmatrix->[$i],$cs-$absstartcol+($j*$COL_WIDTH),3);
+				#$startcodonstr = 'ATG';
+				#$startcodonstr = substr($seqmatrix->[$i],$cs-$absstartcol+($j*$COL_WIDTH),$showfirst);
 				$displaytoken .= 'START2-->';
-			}
+			    }
 			}
 		    #TODO trim to row
 		    }
 		    if($r->[2] <= $features->{$r->[0]}->[1] && $r->[3] >= $features->{$r->[0]}->[1]){
+			my $showfirst = 3;
+			if($ce-$cs<3){
+			    $showfirst = ($ce-$cs)+1;
+			}
 			if($coords[$i]->[2] eq '-'){
-			    #$stopcodonstr = substr($seqmatrix->[$i],$absendcol-$ce-($COL_WIDTH-3),3);
+			    $startcodonstr = substr('***',0,$showfirst);
 			    if($r->[6] eq '-'){
-				#$startcodonstr = substr($seqmatrix->[$i],$absendcol-$ce-($COL_WIDTH-3),3);
-				$startcodonstr = 'ATG';#substr($seqmatrix->[$i],$cs-$absstartcol+($j*$COL_WIDTH),3);
+				#$startcodonstr = 'ATG';
+				#$startcodonstr = substr($seqmatrix->[$i],$cs-$absstartcol+($j*$COL_WIDTH),$showfirst);
 				$displaytoken .= 'START3-->';
 			    }
 			    else{
-				$startcodonstr = 'TTA';#substr($seqmatrix->[$i],$absendcol-$ce-($COL_WIDTH-3),3);
+				#$startcodonstr = 'TTA';
+				#$startcodonstr = substr($seqmatrix->[$i],$absendcol-$ce-($COL_WIDTH-$showfirst),$showfirst);
 				$displaytoken .= 'STOP3<--';
 			    }
 			}
 			else{
+			    $stopcodonstr = substr('***',0,$showfirst);
 			    if($r->[6] eq '-'){
-				$stopcodonstr = 'CAT';#substr($seqmatrix->[$i],$absendcol-$ce-3,3);
+				#$stopcodonstr = 'CAT';
+				#$stopcodonstr = substr($seqmatrix->[$i],$absendcol-$ce-$showfirst,$showfirst);
 				$displaytoken .= '<--START4';
 			    }
 			    else{
-				$stopcodonstr = 'TAA';#substr($seqmatrix->[$i],$absendcol-$ce-3,3);
+				#$stopcodonstr = 'TAA';
+				#$stopcodonstr = substr($seqmatrix->[$i],$absendcol-$ce-$showfirst,$showfirst);
 				$displaytoken .= 'STOP4<--';
 			    }
 			}
@@ -1184,10 +1202,10 @@ sub printAlignment{
 			    $m++;
 			    if($m%3==0){
 				#Don't overwrite start,stop codons
-				#if($idx>length($startcodonstr)+length($leadinggap)
-				#   & $idx<(length($leadinggap)+length($displaystr)-length($stopcodonstr))){
-				substr($fulldisplaystr,$idx,1) = '|';#$frame;
-				#}
+				if($idx>length($startcodonstr)+length($leadinggap)
+				   & $idx<(length($leadinggap)+length($displaystr)-length($stopcodonstr))){
+				substr($fulldisplaystr,$idx,1) = '|';
+				}
 			    }
 			    else{
 				#substr($fulldisplaystr,$idx,1) = substr($mmatrix->[$i],$s-1+$k,1);	
