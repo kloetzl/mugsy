@@ -10,20 +10,51 @@ annotated features in the mapping.
 
 mapfeatures.pl alignments.index seqs.fasta < features.txt 
 
-(1) alignment.index - A index file that is generated with the
-indexing scripts featureindex.pl,mafindex.pl,xmfaindex.pl. The index
-should contain at least one set of aligned regions such as produced
-by a whole genome aligner like MUGSY, Mauve, or TBA
+Outputs are a series of text reports and an HTML report that can be
+loaded in a web browser
 
-(2) features.txt - A space delimited file consisting of 
+Inputs:
+
+(1) alignment.index - An index file containing a whole genome multiple
+alignment and genome annotations. This index can be generated with a
+combination of featureindex.pl,mafindex.pl,xmfaindex.pl. The whole
+genome multiple alignment can be produced by a whole genome aligner
+like Mugsy, TBA (indexed using mafindex.pl) or Mauve (index using
+xmfaindex.pl). The genome annotations in Genbank or GFF3 format can be
+indexed with featureindex.pl
+
+(2) seqs.fasta - Multi-FASTA file of the input genomes. These must be
+    the same genomes aligned.
+
+(3) features.txt - A space delimited file consisting of 
 feature_id sequence_id fmin fmax strand
 
 =head1 SYNOPSIS
 #############
+#Example usage
+#############
+
+#Generate whole genome alignment
+mugsy --prefix nmen_v16 v16/*.fsa
+
+#Index output
+mafindex.pl nmen.index < nmen_v16.maf 
+
+#Index annotations
+featureindex.pl n16.index genbank < nmen_v16.all.gbk > v16annotations.out
+cat v16/*.fsa > v16.all.fsa
+
+#Run mugsy-annotator
+mugsy-annotator ./n16.index ./v16.all.fsa < v16annotations.out > v16.features.mapping
+
+#For more detailed output (v16.html, v16.aln.report, v16.table, v16.clusters, v16.edits)
+mugsy-annotator --prefix v16 --print-alignments ./n16.index ./v16.all.fsa < v16annotations.out > v16.features.mapping
+
+#############
 #APPLICATIONS
 #############
 
-1)Reporting orthologs according to a whole genome alignment
+1)Reporting orthologs using whole genome alignment
 
 The script can be used to produce a list of orthologous genes in the
 case where the input alignments correspond to orthologous regions
@@ -75,12 +106,14 @@ more than one start or end in a single display line
 #specified in the code as fmin=1 fmax=3. Length is fmax-fmin=2
 #
 #Contact: S. Angiuoli (angiuoli@cs.umd.edu) 
+#December 2010
 
 =cut
 
 
 use strict;
-use lib '/usr/local/projects/angiuoli/developer/sangiuoli/mugsy/trunk/mapping';
+use lib '/usr/local/projects/angiuoli/mugsy_trunk/mapping';
+#use lib '/usr/local/projects/angiuoli/developer/sangiuoli/mugsy/trunk/mapping';
 
 use Pod::Usage;
 use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
@@ -90,6 +123,7 @@ use Bio::Perl;
 use Bio::DB::Fasta;
 use Bio::Seq;
 use Bio::Tools::CodonTable;
+use Bio::Seq::EncodedSeq;
 #use Bio::LiveSeq::Mutation; tried this but couldn't get to work properly
 #Default cutoffs
 
@@ -97,55 +131,84 @@ use AlignmentTree;
 
 my %options;
 my $results = GetOptions (\%options, 
+			  'prefix=s',
+			  'map_file=s',
 			  'coverage|c=s',
 			  'query_coverage|q=s',
 			  'identity|i=s',
-			  'minorflen=s',
-			  'maxorflen=s',
+			  'sortkeys=s', #
+			  'reportedits=s', #number of edits to report
+			  'maxchange=s', #max allowable %length changes
+			  'prefix=s', #Generate output reports with file prefix
 			  'cogformat=s',
-			  'printalignments=s',
+			  'printalignments',
 			  'skipaltstarts',
 			  'skipneworfs',
-			  #'skipframeshifts',
+			  'showframeshifts',
+			  #Gene calling options
+			  'minorflen=s',
+			  'maxorflen=s',
+			  'verbose|v',
 			  'debug|d=s') || pod2usage(-verbose => 1);
 
 pod2usage(-verbose=>1) if($options{'help'});
 
-#TODO make configurable
-my $coverage_cutoff = (exists $options{'coverage'}) ?  $options{'coverage'} : 0.7;
+
+my $coverage_cutoff = (exists $options{'coverage'}) ?  $options{'coverage'} : 0.5;
 my $query_coverage_cutoff = (exists $options{'query_coverage'}) ?  $options{'query_coverage'} : 0;
-my $pid_cutoff= (exists $options{'identity'}) ?  $options{'identity'} : 0.6;
+my $pid_cutoff= (exists $options{'identity'}) ?  $options{'identity'} : 0.1;
 print STDERR "Using coverage cutoff:$coverage_cutoff identity:$pid_cutoff query_coverage:$query_coverage_cutoff\n";
 
-my $MAXORFLEN = (exists $options{'maxorflen'}) ? $options{'maxorflen'} : 30000;
+my $MAXORFLEN = (exists $options{'maxorflen'}) ? $options{'maxorflen'} : 30000; #in bp
+my $MINORF= $options{'minorflen'} || 50; #in aa residues
+my $FS_WINDOW = 200; #bp window upstream from pre-mature stop to check for frameshifts
+my $FS_THRESHOLD = 3;
+my $ORFLEN_MAXDELTA = 0.5; #do not consider possible codons that are less than X the length of the maximum annotated ORF
+
+#Used for detecting contig boundaries
+my $PMARK_SPACER = "NNNNNCACACACTTAATTAATTAAGTGTGTGNNNNN";
+
 #Flag for checking consistent start,stop
 #Assumes input features are genes
-my $doconsistencychecks=1;
+my $doconsistencychecks=0;
+
 #Report new ORFs using aligned start codons
 my $dofindneworfs = 1;
 my $autocorrect=0;
-my $MINORF= $options{'minorflen'} || 50;#aa
+
 #my $autofixunmapped=0; #TODO, use consistency checks to fix annotations of unmapped genes
 
 #Only report alternative start codons that
 #results in a longer ORF
 my $longer_altstarts=1;
+my $moreconsistent_altstarts=1;
+
 #Only report alternative start codons that
 #appear more frequently in the aligned genoems
 my $freq_altstarts=1;
 my $freq_altstops=0;
 
 my $aligntoken="WGA";
+my $CODON_DELIM = '.';
+my $CODON_DELIM_REGEX = '\.';
 
 #Output flags
 my $COGoutputformat=(exists $options{'cogformat'}) ? $options{'cogformat'} : 0;
 my $printskipped=1;
 my $printalignments=(exists $options{'printalignments'}) ? $options{'printalignments'} : 0;
+my @sortkeys = (exists $options{'sortkeys'}) ? (split(/,/,$options{'sortkeys'})) : ('gfreq','len','afreq');
+if(scalar @sortkeys != 3){
+
+    print STDERR "Enter sort order using names gfreq,afreq,len for aligned frequency in the genome, annotated frequency, and ORF length. Sort is in descending order, largest value first.\n";
+    print STDERR "eg. --sortkeys gfreq,len,afreq\n";
+
+    exit 1;
+}
 
 #Debugging flags
 my $checkbadlen=0;
 my $debug=$options{'debug'};
-my $verbose=0;
+my $verbose=$options{'verbose'};
 
 #Master list of features and attributes
 #0-seqname
@@ -172,7 +235,15 @@ $atree->{_debug}=$debug;
 
 my %featlookup;
 my $filetype;
-while(my $line=<STDIN>){
+my $fh;
+
+if($options{'map_file'}) {
+	open($fh, "<$options{'map_file'}") or die "Error in opening the file, $options{'map_file'}, $!\n";
+} else {
+	$fh = \*STDIN;
+}
+
+while(my $line=<$fh>){
     my($name,$seq,$fmin,$fmax,$orient,$polyid,$geneid,$annotations);
     chomp $line;
     if($line =~ /\#gff-version 3/){
@@ -273,6 +344,13 @@ my $subsumed = {};
 my $feat2organism = {};
 
 my $db;
+
+if(! $options{'prefix'}){
+    $options{'prefix'} = "mugsyant.$$";
+}
+
+open CFILE, "+>$options{'prefix'}clusters.out";
+
 if(-f "$ARGV[1]"){
     print STDERR "Using FASTA file $ARGV[1]\n";
     $db = Bio::DB::Fasta->new($ARGV[1],'-reindex'=>1); 
@@ -316,7 +394,16 @@ foreach my $query (sort {$features->{$b}->[3] <=> $features->{$a}->[3]} #Sort on
 	die "No mapped genes" if(scalar(keys%$mappedgenes)<1);
 
 	#Mark inconsistencies in the cluster and save codons
+	#Codon aligned, annotated frequency is also saved as 
+	#'start','stop',=>seqname
+	#'pairs'
+	#=>
+	# 'gfreq' -aligned genomic freq 
+	# 'afreq' -annotated freq
+	# 'len' - average length 
+	#
 	my($feat_attrs,$cluster_attrs,$codons) = &annotateCluster($atree,$mappedgenes,$mappedorgs);
+
 	my $seq_attrs = {};
 	my $new_orfs = {};
 	
@@ -326,17 +413,18 @@ foreach my $query (sort {$features->{$b}->[3] <=> $features->{$a}->[3]} #Sort on
 	    $new_orfs = &findnewORFs($db,$atree,$mappedorgs,$mappedgenes,$codons);	    
 	}
 	
+
 	if((scalar(keys %$mappedgenes)>1 && scalar(keys %$mappedorgs)>1)){
 	    print "#Cluster WGA$cluster_id\n" if($debug);;
 	    if($doconsistencychecks){
 		#Determine annotation inconsistencies
 		#(1) Check for genes called on the wrong strand
-		foreach my $feat_name (keys %$mappedgenes){
-		    if($mappedgenes->{$feat_name}->{'morient'}!=0){
-			print "#Class O1. Mis-matched orientation on $feat_name\n" if($debug);;
-			$feat_attrs->{$feat_name}->{'classO1'} = $mappedgenes->{$feat_name}->{'morient'};
-		    }
-		}
+		#foreach my $feat_name (keys %$mappedgenes){
+		#if($mappedgenes->{$feat_name}->{'morient'}!=0){
+		#print "#Class O1. Mis-matched orientation on $feat_name\n" if($debug);;
+		#$feat_attrs->{$feat_name}->{'classO1'} = $mappedgenes->{$feat_name}->{'morient'};
+	        #}
+	        #}
 		
 		#A consistent cluster has both consistent start and stop codons (labeled CS1,CE1)
 		my $consistent=(exists $cluster_attrs->{'CS1'} && exists $cluster_attrs->{'CE1'});
@@ -347,8 +435,39 @@ foreach my $query (sort {$features->{$b}->[3] <=> $features->{$a}->[3]} #Sort on
 		    #Print out alternative (fixed) gene coordinates		    
 		    print "#Looking for new starts\n" if($debug);;
 		    if(!defined $options{'skipaltstarts'}){
-			&checkStarts($db,$codons,[keys %$mappedorgs],$seq_attrs);
+			my $altorfs = &checkStarts($db,$codons,[keys %$mappedorgs],$seq_attrs);
+			#Report alternative start codons in decreasing order of use
+			foreach my $aorf (@$altorfs){
+			    my($seqname,$fmin,$fmax,$orforient,$orfstartcodon,$orfstopcodon) = @_;
+			    my $frame;
+			    my $dist;
+			    if($orforient eq '-'){
+				$frame=(($db->get_Seq_by_id($seqname)->length()-$fmax)%3)*-1;
+				$dist=0;#$end-$althash->{'end'};
+			    }
+			    else{
+				$frame=$fmin%3;
+				$dist=0;#$start-$althash->{'start'};
+			    }
+			    
+			    if(!exists $seq_attrs->{$seqname}){
+				$seq_attrs->{$seqname} = [];
+			    }
+			    if($freq_altstops){ 
+				#check if stop is consistent with at least one other stop
+				#if($althash->{'stopfreq'}>1){
+				    #push @{$seq_attrs->{$seqname}},"alt_start=$althash->{'start'}-$althash->{'end'},orient:$althash->{'orient'},len:".($althash->{'end'}-$althash->{'start'}).",pairfreq:$codons->{'pairs'}->{$althash->{'startcodon'}.':'.$althash->{'stopcodon'}}->{'gfreq'},startfreq:$althash->{'startfreq'},stopfreq:$althash->{'stopfreq'},frame:$frame,dist:$dist,startcodon:$althash->{'startcodon'},stopcodon:$althash->{'stopcodon'};";
+			    #}
+			    }
+			    else{
+				#push @{$seq_attrs->{$seqname}},"alt_start=$althash->{'start'}-$althash->{'end'},orient:$althash->{'orient'},len:".($althash->{'end'}-$althash->{'start'}).",pairfreq:$codons->{'pairs'}->{$althash->{'startcodon'}.':'.$althash->{'stopcodon'}}->{'gfreq'},startfreq:$starts->{$althash->{'startcodon'}},stopfreq:$stops->{$althash->{'stopcodon'}},frame:$frame,dist:$dist,startcodon:$althash->{'startcodon'},stopcodon:$althash->{'stopcodon'};";
+			    }
+			}
 		    }
+		    #foreach my $feat_name (keys %$mappedgenes){
+			#$feat_attrs->{$feat_name}->{'pairfreq='.$codons->{'pairs'}->{"$codons->{'featstarts'}->{$feat_name}"."$codons->{'featstops'}->{$feat_name}"}}++;
+			#$feat_attrs->{$feat_name}->{'pairfreq'}=$codons->{'pairs'}->{"$codons->{'featstarts'}->{$feat_name}".':'."$codons->{'featstops'}->{$feat_name}"}->{'gfreq'};
+		    #}
 		    #(3) Attempt to resolve inconsistencies by frameshifting
 		    #Using aligned codons as start sites and indels adjacent to stops
 		    #as possible locations of the frameshift
@@ -357,31 +476,231 @@ foreach my $query (sort {$features->{$b}->[3] <=> $features->{$a}->[3]} #Sort on
 		    #-frameshift location and indel
 		    #-new ORF,translation
 		    #-any deleted genes
-		    #if(!defined $options{'skipframeshifts'}){
-		    #&checkFrameshifts($db,$mappedorgs,$mappedgenes,$codons,$seq_attrs);
-		    #}
+		    if(defined $options{'showframeshifts'}){
+			print "#Looking for frameshifts\n" if($debug);;
+			#&checkFrameshifts($db,$mappedorgs,$mappedgenes,$codons,$seq_attrs);
+			&checkFrameshifts_new($db,$codons,$mappedorgs,$seq_attrs);
+		    }
 		}
 	    }
+
+	    
+	    
 	
 	    #We have a good cluster, save it
 	    #Save the cov,pid in master list of mapped genes
+
+	    my $totallen=0;
+	    my $maxlen=0;
 	    foreach my $feat_name (keys %$mappedgenes){
 		die "Feature $feat_name already mapped" if(exists $mapped->{$feat_name});
 		$mapped->{$feat_name}->{'cov'}=$mappedgenes->{$feat_name}->{'cov'}/$features->{$feat_name}->[3];
 		$mapped->{$feat_name}->{'pid'}=$mappedgenes->{$feat_name}->{'pid'}/$mappedgenes->{$feat_name}->{'len'};
+		$totallen += $features->{$feat_name}->[3];
+		$maxlen = ($features->{$feat_name}->[3] > $maxlen) ? $features->{$feat_name}->[3] : $maxlen;
 		delete $unmapped->{$feat_name};
 	    }
+	    my $avglen=$totallen/(scalar keys %$mappedgenes);
+	    my $fshifts=0;
+	    my $classesstr;
+	    $debug=1;
+	    if(!defined $options{'reportedits'} || $options{'reportedits'} > 0){
+		#Save aligned and annotated codon frequency
+		foreach my $p (keys %{$codons->{'pairs'}}){
+		    print "#Analyzing codon pair $p\n" if($debug);
+		    my($startcodon,$stopcodon) = split(/:/,$p);
+		    foreach my $seqname (keys %$mappedorgs,keys %$unmappedorgs){
+			print "#Sequence $seqname\n" if($debug);
+			#if this is the annotated pair
+			if(exists $codons->{'pairs'}->{$p}->{'orgs'}->{$seqname} && $codons->{'pairs'}->{$p}->{'orgs'}->{$seqname}->[3]==1){
+			    #Do nothing, already annotated
+			    $codons->{'pairs'}->{$p}->{'features'}->{$seqname} = $mappedorgs->{$seqname}->{'features'};	
+			    print "#annotated\n" if($debug);
+			}
+			else{
+			    #check if this is an ORF in $seqname
+			    my($fmin,$fmax,$orient) = &findCoords($atree,$seqname,$startcodon,$stopcodon);
+			    if(defined $fmin && defined $fmax && defined $orient && $fmax>$fmin){
+				die "$atree,$seqname,$startcodon,$stopcodon" if(! defined $fmin || ! defined $fmax);
+				if(&isORF($db,$seqname,$fmin,$fmax,$orient)){
+				    if(exists $unmappedorgs->{$seqname}){
+					#Requires a new ORF in an unannotated region
+					$codons->{'pairs'}->{$p}->{'orgs'}->{$seqname} = [$fmin,$fmax,$orient,-1];
+					print "#neworf $p $seqname ",$fmax-$fmin,"\n" if($debug);
 
+				    }
+				    else{
+					#Requires a new ORF that is different than currently annotated
+					$codons->{'pairs'}->{$p}->{'orgs'}->{$seqname} = [$fmin,$fmax,$orient,0];
+					if(exists $mappedorgs->{$seqname}){
+					    $codons->{'pairs'}->{$p}->{'features'}->{$seqname} = $mappedorgs->{$seqname}->{'features'};	
+					    print "#altorf\n" if($debug);
+					}
+					else{
+					    print "#altorf, prev did not pass cutoffs\n" if($debug);
+					}
+				    }
+				}
+				else{
+				    #Look for possible frameshifts if there are either
+				    #a) Multiple annotated ORFs in this region
+				    #b) An upstream stop codon
+				    my $feat_name;
+				    my $annotatedstop;
+				    if(exists $mappedorgs->{$seqname} && scalar(keys %{$mappedorgs->{$seqname}->{'features'}}) == 1){
+					$feat_name = [keys %{$mappedorgs->{$seqname}->{'features'}}]->[0];
+					$annotatedstop = $features->{$feat_name}->[7] . $CODON_DELIM . $features->{$feat_name}->[8];
+				    }
+				    if(exists $unmappedorgs->{$seqname}
+				       || 
+				       (exists $mappedorgs->{$seqname}
+					&&
+					(scalar(keys %{$mappedorgs->{$seqname}->{'features'}}) > 1
+					 ||
+					 $stopcodon ne $annotatedstop
+					 )
+					)){
+					die "$seqname found in both mapped and unmapped org lists" if(exists $unmappedorgs->{$seqname} && exists $mappedorgs->{$seqname});
+					print "#Considering FS $stopcodon ne $annotatedstop for $feat_name on $seqname\n" if($debug && exists $mappedorgs->{$seqname});
+					#Find most similar sequence that has this ORF
+					my @neighborseqs = keys %{$codons->{'pairs'}->{$p}->{'orgs'}};
+					my($nearestseq,$indels,$fs) = &findNearestNeighbor($atree,$seqname,\@neighborseqs,$startcodon,$stopcodon);
+					print "#Using $nearestseq as nearest neighbor to $seqname\n" if($debug);
+					#Look for frameshifting mutations in $seqname
+					my($fs,$netfs) = &reportFrameShifts($atree,$db,$seqname,$nearestseq,$startcodon,$stopcodon);
+					if(ref $fs){
+					    print "#Possible ORF with frameshift #indels:",scalar(@$fs)," net:$netfs\n" if($debug);
+						if(abs($netfs) <= $FS_THRESHOLD){
+						    print "#Adding frameshift net:",scalar(@$fs)," $netfs\n" if($debug);
+						    $codons->{'pairs'}->{$p}->{'orgs'}->{$seqname} = [$fmin,$fmax,$orient,0,$fs];
+						    if(exists $mappedorgs->{$seqname}){
+							$codons->{'pairs'}->{$p}->{'features'}->{$seqname} = $mappedorgs->{$seqname}->{'features'};
+						    }
+						}
+					}
+				    }
+				}
+			    }
+			}
+		    }
+		}
+		foreach my $p (keys %{$codons->{'pairs'}}){
+		    foreach my $org (keys %{$codons->{'pairs'}->{$p}->{'orgs'}}){
+			print "#CODONPAIR ",join(',',@{$codons->{'pairs'}->{$p}->{'orgs'}->{$org}}),"\n" if($verbose);
+			$codons->{'pairs'}->{$p}->{'gfreq'}++;
+			$codons->{'pairs'}->{$p}->{'afreq'}++ if($codons->{'pairs'}->{$p}->{'orgs'}->{$org}->[3]==1); #inc only if annotated
+			$codons->{'pairs'}->{$p}->{'length'}+=($codons->{'pairs'}->{$p}->{'orgs'}->{$org}->[1] - $codons->{'pairs'}->{$p}->{'orgs'}->{$org}->[0]);
+			if(ref $codons->{'pairs'}->{$p}->{'orgs'}->{$org}->[4]){
+			    $codons->{'pairs'}->{$p}->{'fsvars'}+=1;
+			    print "#FS ",join(',',@{$codons->{'pairs'}->{$p}->{'orgs'}->{$org}->[4]}),"\n" if($verbose);
+			}
+			$codons->{'pairs'}->{$p}->{'neworfs'}+=1 if($codons->{'pairs'}->{$p}->{'orgs'}->{$org}->[3]<0);
+		    }
+		$codons->{'pairs'}->{$p}->{'len'} = $codons->{'pairs'}->{$p}->{'length'}/$codons->{'pairs'}->{$p}->{'gfreq'} if($codons->{'pairs'}->{$p}->{'gfreq'} > 0);
+		}
+
+		$classesstr = join(';',sort {$a cmp $b} keys %{$cluster_attrs});
+		#Suggest edits for inconsistently annotated clusters
+		if($classesstr ne 'CE1;CS1'){
+		    #Choose N best start,stop pairs according to sortkeys
+		    my @bestcodonpair = sort {
+			if($codons->{'pairs'}->{$a}->{$sortkeys[0]} eq $codons->{'pairs'}->{$b}->{$sortkeys[0]}){
+			    if($codons->{'pairs'}->{$a}->{$sortkeys[1]} eq $codons->{'pairs'}->{$b}->{$sortkeys[1]}){
+				#sort on tertiary sortkey, eg length
+				$codons->{'pairs'}->{$b}->{$sortkeys[2]} <=> $codons->{'pairs'}->{$a}->{$sortkeys[2]};
+			    }
+			    else{
+				#sort on secondary sortkey, eg annotated frequency
+				$codons->{'pairs'}->{$b}->{$sortkeys[1]} <=> $codons->{'pairs'}->{$a}->{$sortkeys[1]};
+			    }
+			}
+			else{
+			    #sort on primary sortkey, eg. aligned frequency of start codon in the genome
+			    $codons->{'pairs'}->{$b}->{'gfreq'} <=> $codons->{'pairs'}->{$a}->{'gfreq'};
+			}
+		    } (keys %{$codons->{'pairs'}});
+		    if(scalar(@bestcodonpair)>0){
+			open EFILE, ">$options{'prefix'}cluster$cluster_id.edits.out";
+			for(my $i=0;$i<scalar(@bestcodonpair);$i++){
+			    my $bestcodon = $bestcodonpair[$i];
+			    if($codons->{'pairs'}->{$bestcodon}->{'gfreq'} > 1){
+				my $codonlength = ($codons->{'pairs'}->{$bestcodon}->{'length'}/$codons->{'pairs'}->{$bestcodon}->{'gfreq'});
+				
+				my $deltafracmax = abs($codonlength-$maxlen)/$maxlen;
+				if($deltafracmax < $ORFLEN_MAXDELTA){
+				    print EFILE ">CLUSTER_$cluster_id $bestcodon\n";
+				    my $newmappedorgs; 
+				    my $newmappedgenes;
+				    foreach my $org (keys %{$codons->{'pairs'}->{$bestcodon}->{'orgs'}}){
+					if(scalar(keys %{$codons->{'pairs'}->{$bestcodon}->{'features'}->{$org}})>0){
+					    foreach my $feat_name (keys %{$codons->{'pairs'}->{$bestcodon}->{'features'}->{$org}}){
+						my $pred_feat = $codons->{'pairs'}->{$bestcodon}->{'orgs'}->{$org};
+						if($pred_feat->[0] ne $features->{$feat_name}->[1] || 
+						   $pred_feat->[1] ne $features->{$feat_name}->[2]){
+						    my $fs = (defined $codons->{'pairs'}->{$bestcodon}->{'orgs'}->{$org}->[4]) ? "F" : "";
+						    print EFILE "$feat_name\t$org\t$pred_feat->[0]\t$pred_feat->[1]\t",($pred_feat->[1] - $pred_feat->[0]),"\t$pred_feat->[2]\t$fs\n";
+						}
+						$newmappedorgs->{$org}->{'features'}->{$feat_name}++;
+						$newmappedgenes->{$feat_name}->{'fmin'} = $pred_feat->[0];
+						$newmappedgenes->{$feat_name}->{'fmax'} = $pred_feat->[1];
+						$newmappedgenes->{$feat_name}->{'len'} = $pred_feat->[1] - $pred_feat->[0];
+						$newmappedgenes->{$feat_name}->{'relorient'} = $pred_feat->[2];
+					    }
+					}
+					else{
+					    $cluster_attrs->{'CN1'}++;
+					    my $feat_name = "NEWORF_CLUSTER$cluster_id";
+					    my $pred_feat = $codons->{'pairs'}->{$bestcodon}->{'orgs'}->{$org};
+					    print EFILE "$feat_name\t$org\t$pred_feat->[0]\t$pred_feat->[1]\t",($pred_feat->[1] - $pred_feat->[0]),"\t$pred_feat->[2]\n";
+					    $newmappedorgs->{$org}->{'features'}->{$feat_name}++;
+					    $newmappedgenes->{$feat_name}->{'fmin'} = $pred_feat->[0];
+					    $newmappedgenes->{$feat_name}->{'fmax'} = $pred_feat->[1];
+					    $newmappedgenes->{$feat_name}->{'len'} = $pred_feat->[1] - $pred_feat->[0];
+					    $newmappedgenes->{$feat_name}->{'relorient'} = $pred_feat->[2];
+					}
+				    }
+				    my $newclassesstr = $codons->{'pairs'}->{$bestcodon}->{'cluster_attrs'};
+				    print "#BEST CODON $bestcodon $codons->{'pairs'}->{$bestcodon}->{'gfreq'} max_annotated_len:$maxlen delta_len_max:$deltafracmax\n"; 
+				    print "#EDITTBL CLUSTER_$cluster_id $bestcodon\t$codons->{'pairs'}->{$bestcodon}->{'gfreq'}";
+				    if($codons->{'pairs'}->{$bestcodon}->{'fsvars'} > 0){
+					print "(F:$codons->{'pairs'}->{$bestcodon}->{'fsvars'})";
+				    }
+				    if($codons->{'pairs'}->{$bestcodon}->{'neworfs'} > 0){
+					print "(N:$codons->{'pairs'}->{$bestcodon}->{'neworfs'})";
+				    }
+				    
+				    print "\t$codons->{'pairs'}->{$bestcodon}->{'afreq'}\t$codons->{'pairs'}->{$bestcodon}->{'len'}\t$codons->{'pairs'}->{$bestcodon}->{'fshifts'}\t$codons->{'pairs'}->{$bestcodon}->{'neworfs'}\t";
+				    if($codonlength eq $maxlen){
+					print "#MAXLENEDIT ";
+				    }
+				    if($codons->{'pairs'}->{$bestcodon}->{'gfreq'} eq scalar(keys %$mappedorgs)){
+					print "#FCONSISTENT ";
+				    }
+				    print "#$classesstr orig\n";
+				    #print "#$newclassesstr new\n";
+				    #&reportCluster($query,$newmappedorgs,$newmappedgenes,{},$feat_attrs,$cluster_attrs,$seq_attrs);
+				}
+			    }
+			    else{
+				#print STDERR "#WARNING Codon $bestcodon has 0 frequency\n";
+			    }
+			}
+			close EFILE;
+		    }
+		}
+	    }
+	    $classesstr = join(';',sort {$a cmp $b} keys %{$cluster_attrs});
 	    #Print cluster
+	    $debug=0;
 	    &reportCluster($query,$mappedorgs,$mappedgenes,$unmappedgenes,$feat_attrs,$cluster_attrs,$seq_attrs,$new_orfs);
-	    my $classesstr = join(';',sort {$a cmp $b} keys %{$cluster_attrs});
+
 	    $classes_sum->{$classesstr}->{'ngenes'} +=scalar(keys %$mappedgenes);
 	    $classes_sum->{$classesstr}->{'nclusters'}++;
 
 	    $validcluster++;
 	    if($COGoutputformat){}
 	    else{
-		print "#VALID\tWGA$cluster_id\tNum_organisms=",scalar(keys %$mappedorgs)+1,
+		print "#VALID\tCLUSTER_$cluster_id\tNum_organisms=",scalar(keys %$mappedorgs)+1,
 		"\tNum_genes=",scalar(keys %$mappedgenes),"\n" if($debug);;
 	    }
 	    #For unmapped genes, save the best overlapping alignment
@@ -422,18 +741,20 @@ foreach my $query (sort {$features->{$b}->[3] <=> $features->{$a}->[3]} #Sort on
 		else{
 		    #print "#$query\tWGA$cluster_id\t$currorg\tcov:",$qcov/($fmax-$fmin),"\tid:1\tspan:$fmin-$fmax\tlen:",$fmax-$fmin,"\n";
 		    foreach my $organism (sort {$a cmp $b} keys %$unmappedorgs){
-			my($start,$end) = &getspan($unmappedgenes,keys %{$unmappedorgs->{$organism}->{'features'}});
-			my @ogenes = sort {$features->{$a}->[1] <=> $features->{$b}->[1]} (keys %{$unmappedorgs->{$organism}->{'features'}});
-			my @ocovs = map {sprintf("%.2f",$unmappedgenes->{$_}->{'cov'}/$features->{$_}->[3])} (@ogenes);
-			my @oids  = map {sprintf("%.2f",$unmappedgenes->{$_}->{'pid'}/$unmappedgenes->{$_}->{'len'})} (@ogenes);
-
-			print "#",join(',',@ogenes),
-			"\tWGA$cluster_id",
-			"\t$organism",
-			"\tcov:",join(',',@ocovs),
-			"\tid:",join(',',@oids),
-			"\tspan:$start-$end len:",$end-$start,
-			"\n" if($debug);
+			if(ref $unmappedorgs->{$organism} && exists $unmappedorgs->{$organism}->{'features'}){
+			    my($start,$end) = &getspan($unmappedgenes,keys %{$unmappedorgs->{$organism}->{'features'}});
+			    my @ogenes = sort {$features->{$a}->[1] <=> $features->{$b}->[1]} (keys %{$unmappedorgs->{$organism}->{'features'}});
+			    my @ocovs = map {sprintf("%.2f",$unmappedgenes->{$_}->{'cov'}/$features->{$_}->[3])} (@ogenes);
+			    my @oids  = map {sprintf("%.2f",$unmappedgenes->{$_}->{'pid'}/$unmappedgenes->{$_}->{'len'})} (@ogenes);
+			    
+			    print "#",join(',',@ogenes),
+			    "\tWGA$cluster_id",
+			    "\t$organism",
+			    "\tcov:",join(',',@ocovs),
+			    "\tid:",join(',',@oids),
+			    "\tspan:$start-$end len:",$end-$start,
+			    "\n" if($debug);
+			}
 		    }
 		}
 	    }
@@ -453,6 +774,7 @@ foreach my $query (sort {$features->{$b}->[3] <=> $features->{$a}->[3]} #Sort on
 	    my @ogenes = sort {$features->{$a}->[1] <=> $features->{$b}->[1]} (keys %{$mappedorgs->{$organism}});
 	    my $classes;
 	    my $longestorf=0;		
+	    my $longestpairc=0;		
 	    foreach my $gene (@ogenes){
 		if(exists $feat_attrs->{$gene}){
 		    foreach my $c (sort {$a cmp $b} keys %{$feat_attrs->{$gene}}){
@@ -460,10 +782,11 @@ foreach my $query (sort {$features->{$b}->[3] <=> $features->{$a}->[3]} #Sort on
 		    }
 		}
 		$longestorf = ($features->{$gene}->[3] > $longestorf) ? $features->{$gene}->[3] : $longestorf;
+		$longestpairc = ($feat_attrs->{$gene}->{'pairfreq'} > $longestpairc) ? $feat_attrs->{$gene}->{'pairfreq'} : $longestpairc;
 	    }
 	    ##
 
-	    my @attrs = sort {$a cmp $b} keys %$classes;
+				 #my @attrs = sort {$a cmp $b} keys %$classes;
 	    if(exists  $seq_attrs->{$organism}){
 		#Report alternative start sites if they result in a longer ORF
 		my @alts;
@@ -474,11 +797,14 @@ foreach my $query (sort {$features->{$b}->[3] <=> $features->{$a}->[3]} #Sort on
 			print "#$alt\n" if($debug);;
 			#Only report if results in a longer ORF
 			my($astart,$aend,$aorient,$alen) = ($alt =~ /alt_start=(\d+)-(\d+),orient\:([^,]+),len\:(\d+)/);
+			my($apairfreq) = ($alt =~ /pairfreq:(\d+)/);
 			print "#alt $astart,$aend,$aorient,$alen\n" if($debug);;
-			die "$alt" if(!$astart || !$aend || !$aorient || !$alen);
+			print STDERR "BAD $alt" if(!$astart || !$aend || !$aorient || !$alen);
 			if(!$longer_altstarts || $alen>$longestorf){
-			    push @alts,["ALTSTARTgene$organism$orfidx",$astart,$aend,$aend-$astart,$aorient];
-			    $orfidx++;
+			    if(!$moreconsistent_altstarts || $apairfreq>$longestpairc){
+				push @alts,["ALTSTARTgene$organism$orfidx",$astart,$aend,$aend-$astart,$aorient];
+				$orfidx++;
+			    }
 			}
 			else{
 			    print "#Skipping $alt $alen<$longestorf\n" if($debug);;
@@ -626,8 +952,11 @@ print "Class legend\n";
 print "C{S,E}1 - consistent start,stop\n";
 print "C{S,E}2 - inconsistent start,stop\n";
 print "C{S,E}3 - unaligned start,stop\n";
+print "C{S,E}0 - start,stop is missing, runs off a contig end\n";
 print "CM1 - multiple fragments spanned\n";
 print "CO1 - mismatch orientation\n";
+print "CN1 - aligned ORFs on unannotated genomes\n";
+
 foreach my $cstr (sort {$classes_sum->{$b}->{'ngenes'} <=> $classes_sum->{$a}->{'ngenes'}} (keys %$classes_sum)){
     print "$cstr: num_genes:$classes_sum->{$cstr}->{'ngenes'} num_clusters:$classes_sum->{$cstr}->{'nclusters'}\n";
 }
@@ -646,6 +975,11 @@ foreach my $cstr (sort {$newclasses_sum->{$b}->{'ngenes'} <=> $newclasses_sum->{
     print "$cstr: num_genes:$newclasses_sum->{$cstr}->{'ngenes'} num_clusters:$newclasses_sum->{$cstr}->{'nclusters'}\n";
 }
 print "POST CORRECTION alt starts, long orfs w/ frameshifts\n";
+
+close CFILE;
+close EFILE;
+close DFILE;
+
 exit(0);
 
 #############################
@@ -681,7 +1015,8 @@ sub buildCluster{
     
     #List of alignments that comprise the current cluster
     my $goodalignments = {};
-    
+    my $allseqs = {};
+
     #List of organism_ids in the current cluster 
     my $mappedorgs = {}; #passes cutoffs
     my $unmappedorgs = {}; #do not pass cutoffs
@@ -694,9 +1029,6 @@ sub buildCluster{
     my $alnfeats = {};
     my $alnorgs = {};
 
-    #Map of feat_name->organism_name
-    my $feat2organism = {};
-    
     my $valid=0;
     
     #First screen all overlapping alignments to ensure that they
@@ -709,6 +1041,11 @@ sub buildCluster{
 	if($feat_name eq 'gene:'.$query){
 	    print "#Mapped $feat_name $query $align_name\n" if($debug);
 	    $goodalignments->{$align_name}++;
+	    my $alignedseqs  = $atree->{_alignments}->{$align_name}->[0];
+	    foreach my $seq (@$alignedseqs){
+		die if(ref $seq->[0]);
+		$allseqs->{$seq->[0]}++;
+	    }
 	}
     }
     
@@ -717,14 +1054,25 @@ sub buildCluster{
 	print "#QUERY=$query coords=$qfmin-$qfmax len=$features->{$query}->[3] strand=$features->{$query}->[4] Num_alignments=",scalar(keys %$goodalignments),"\n";
     }
     
-    foreach my $r (sort {   #Sort alphanumeric on alignment_name, secondary on align_start
-	if($a->[0] eq $b->[0]){
-	    $a->[2] <=> $b->[2];
-	}
-	else{
-	    $a->[0] cmp $b->[0];
-	}
-    } @isect){
+    #Transform feat_name
+    my @nisect;
+    foreach my $r (@isect) {
+	$r->[0] =~ s/gene\://;
+	push @nisect,$r if(exists $features->{$r->[0]});
+    }
+
+    foreach my $r (
+		   sort { $features->{$b->[0]}->[3] <=> $features->{$a->[0]}->[3] } #sort on feature length
+		   
+                          #sort {   #Sort alphanumeric on alignment_name, secondary on align_start
+			  #    if($a->[0] eq $b->[0]){
+			  #	   $a->[2] <=> $b->[2];
+			  #    }
+			  #    else{
+			  #	   $a->[0] cmp $b->[0];
+			  #    }
+			  #} 
+		   @nisect){
 	my $feat_name = $r->[0];
 	my $seqname = $r->[1];
 	my $align_name = $r->[5];
@@ -733,14 +1081,14 @@ sub buildCluster{
 	    my($alnobj,$bv,$width) = $atree->getAlignment($align_name);
 	    $feat_name =~ s/gene\://;
 	    if(!exists $features->{$feat_name}){
-		print STDERR "#Bad feature found $feat_name. Not in input file. Skipping\n";
+		print "#Bad feature found $feat_name. Not in input file. Skipping\n" if($debug);
 		next;
 	    }
 	    #Capture some stats on the matching genes
 	    #TODO the cov,pid stats assume non-overlapping alignments
 	    if($query ne $feat_name){
 		#Only report genes that have not been mapped
-		if(!exists $mapped->{$feat_name} && !exists $deleted->{$feat_name}){
+		if(!exists $mapped->{$feat_name} && !exists $deleted->{$feat_name} && exists $features->{$feat_name}){
 		    print "#MAP:",join("\t",$cluster_id,@$r),"\n" if($debug);		
 		    die "Mismatching orientation for $feat_name. Mapping showing $r->[12]. Input reporting $features->{$feat_name}->[4]" if($r->[12] ne $features->{$feat_name}->[4]);
 		    die "fmax < fmin" if($r->[3]<$r->[2]);
@@ -875,11 +1223,7 @@ sub buildCluster{
 	}
 	else{
 	    print "BELOW\n" if($debug);
-	    #Does not pass cutoffs
-	    $unmappedorgs->{$feat2organism->{$feat_name}}->{'features'}->{$feat_name}++;
-	    $unmappedorgs->{$feat2organism->{$feat_name}}->{'features'}->{$feat_name}++;
-	    $unmappedorgs->{$feat2organism->{$feat_name}}->{'qcov'} = $alnorgs->{$feat2organism->{$feat_name}}->{'qcov'};
-	    
+	    #Does not pass cutoffs	    
 	    $unmappedgenes->{$feat_name}->{'cov'} = $alnfeats->{$feat_name}->{'cov'};
 	    $unmappedgenes->{$feat_name}->{'fmin'} = $alnfeats->{$feat_name}->{'fmin'};
 	    $unmappedgenes->{$feat_name}->{'fmax'} = $alnfeats->{$feat_name}->{'fmax'};
@@ -887,6 +1231,20 @@ sub buildCluster{
 	    $unmappedgenes->{$feat_name}->{'len'} = $alnfeats->{$feat_name}->{'len'};
 	    $unmappedgenes->{$feat_name}->{'relorient'} = $alnfeats->{$feat_name}->{'relorient'};
 
+	}
+    }
+    foreach my $seq (keys %$allseqs){
+	if(!exists $mappedorgs->{$seq}){
+	    #Does not pass cutoffs
+	    $unmappedorgs->{$seq} = {};
+	}
+    }
+    foreach my $feat_name (keys %{$unmappedgenes}){
+	if(!exists $mappedorgs->{$feat2organism->{$feat_name}}){
+	    die "ORG found in mapped list $feat2organism->{$feat_name} $feat_name query:$query queryorg:$qcurrorg" if(exists $mappedorgs->{$feat2organism->{$feat_name}});
+	    $unmappedorgs->{$feat2organism->{$feat_name}}->{'features'}->{$feat_name}++;
+	    $unmappedorgs->{$feat2organism->{$feat_name}}->{'features'}->{$feat_name}++;
+	    $unmappedorgs->{$feat2organism->{$feat_name}}->{'qcov'} = $alnorgs->{$feat2organism->{$feat_name}}->{'qcov'};
 	}
     }
     return($mappedorgs,$mappedgenes,$unmappedorgs,$unmappedgenes);
@@ -911,6 +1269,8 @@ sub annotateCluster{
 
     my $starts = {};
     my $stops = {};
+    my $codonpairs = {};
+
     my $alignedstartcount=0;
     my $alignedstopcount=0;
 
@@ -934,15 +1294,16 @@ sub annotateCluster{
 	my $relorient = $genes->{$feat_name}; #relative orientation of the annotation on the aligned seq
 	#$relorient == 1 Annotation and alignment are on the same strand
 	#$relorient == 0 Annotation and alignment are on opposite strands
-	my($startcodon,$stopcodon) = &findCodons($atree,
-						 $seqname,
-						 $fmin,
-						 $fmax,
-						 $orient,$feat_name);
+	my($startcodon,$stopcodon,$partial_start,$partial_stop) = &findCodons($atree,
+									      $seqname,
+									      $fmin,
+									      $fmax,
+									      $orient,$feat_name);
+
 
 	if(ref $startcodon){
 	    my($mcol,$align_name) = (@$startcodon);
-	    my $token = $mcol.'?'.$align_name;
+	    my $token = $mcol.$CODON_DELIM.$align_name;
 	    if($debug){
 		if($orient eq '+'){
 		    my @res= AlignmentTree::coordstocolumn($atree->{_alignments}->{$align_name}->[0],$seqname,$fmin,$fmin+3);
@@ -960,6 +1321,10 @@ sub annotateCluster{
 	    $features->{$feat_name}->[8] = $startcodon->[1];
 	    $seqstarts->{$seqname}->{$token}++;
 	    $featstarts->{$feat_name} = $token;
+	    if($partial_start){
+		$feat_attrs->{$feat_name}->{'CS0'}++; #start codon in PMARK spacer adjacent to contig boundary
+		$cluster_attrs->{'CS0'}++;
+	    }
 	    if($debug){
 		$feat_attrs->{$feat_name}->{'startcol:'.$mcol}++;
 	    }
@@ -976,7 +1341,7 @@ sub annotateCluster{
 	}
 	if(ref $stopcodon){
 	    my($mcol,$align_name) = (@$stopcodon);
-	    my $token = $mcol.'?'.$align_name;
+	    my $token = $mcol.$CODON_DELIM.$align_name;
 	    if($debug){
 		if($orient eq '+'){
 		    my @res= AlignmentTree::coordstocolumn($atree->{_alignments}->{$align_name}->[0],$seqname,$fmax-3,$fmax);
@@ -994,6 +1359,10 @@ sub annotateCluster{
 	    $features->{$feat_name}->[10] = $stopcodon->[1];
 	    $seqstops->{$seqname}->{$token}++;
 	    $featstops->{$feat_name} = $token;
+	    if($partial_stop){
+		$feat_attrs->{$feat_name}->{'CE0'}++; #stop codon in PMARK spacer adjacent to contig boundary
+		$cluster_attrs->{'CE0'}++;
+	    }
 	    if($debug){
 		$feat_attrs->{$feat_name}->{'stopcol:'.$mcol}++;
 	    }
@@ -1006,43 +1375,59 @@ sub annotateCluster{
 		$feat_attrs->{$feat_name}->{'CE3'}++;
 	    }
 	}
+	if(exists $featstarts->{$feat_name} && $featstops->{$feat_name}){
+	    #$codonpairs->{$featstarts->{$feat_name}.':'.$featstops->{$feat_name}}->{'gfreq'}++;
+	    #$codonpairs->{$featstarts->{$feat_name}.':'.$featstops->{$feat_name}}->{'afreq'}++;
+	    #$codonpairs->{$featstarts->{$feat_name}.':'.$featstops->{$feat_name}}->{'length'}+=$len;
+
+	    $codonpairs->{$featstarts->{$feat_name}.':'.$featstops->{$feat_name}}->{'orgs'}->{$seqname} = [$fmin,$fmax,$orient,1]; #[fmin,fmax,orient,is_annotated,fs_type]
+	    
+	}
+
     }
 
     if(scalar(keys %$starts)==1){
-      my @start = keys %$starts; 
-      if($starts->{$start[0]}==scalar(keys %$genes)){
-	print "#Class CS1. Consistent starts\n" if($debug);;
-	$cluster_attrs->{'CS1'}++;
-      }
-      else{
-        print "#Class CS3. Unaligned starts ",$starts->{$start[0]}, "==",scalar(keys %$genes),"\n" if($debug);;
-	$cluster_attrs->{'CS3'}++;
-      }
-      
+	#There is only one annotated start
+	my @start = keys %$starts; 
+	if($starts->{$start[0]}==scalar(keys %$genes)){
+	    #and every gene has this annotated start
+	    print "#Class CS1. Consistent starts\n" if($debug);;
+	    $cluster_attrs->{'CS1'}++;
+	}
+	else{
+	    #some genes are missing this start codon but there are no others
+	    print "#Class CS3. Unaligned starts ",$starts->{$start[0]}, "==",scalar(keys %$genes),"\n" if($debug);;
+	    $cluster_attrs->{'CS3'}++;
+	}
     }
     else{
 	if($alignedstartcount == scalar(keys %$genes)){
+	    #there is one annotated start codon for each genome, but not all genomes use the same start
 	    print "#Class CS2. Inconsistent starts\n" if($debug);;
 	    $cluster_attrs->{'CS2'}++;
 	}
 	else{
+	    #there are multiple annotated start codons for genome
 	    print "#Class CS3. Unaligned starts ",$alignedstartcount," == ",scalar(keys %$genes),"\n" if($debug);;
 	    $cluster_attrs->{'CS3'}++;
 	}
     }
     if(scalar(keys %$stops)==1){
-      my @stop = keys %$stops;
-      if($stops->{$stop[0]}==scalar(keys %$genes)){
-        print "#Class CE1. Consistent stops\n" if($debug);;
-	$cluster_attrs->{'CE1'}++;
-      }
-      else{
-        print "#Class CE3. Unaligned stops\n" if($debug);;
-	$cluster_attrs->{'CE1'}++;
-      }
+	#There is only one annotated stop
+	my @stop = keys %$stops;
+	if($stops->{$stop[0]}==scalar(keys %$genes)){
+	    #and every gene is annotated with this stop
+	    print "#Class CE1. Consistent stops\n" if($debug);;
+	    $cluster_attrs->{'CE1'}++;
+	}
+	else{
+	    print "#Class CE3. Unaligned stops\n" if($debug);;
+	    $cluster_attrs->{'CE1'}++;
+	}
     }
     else{
 	if($alignedstopcount == scalar(keys %$genes)){
+	    #there is one annotated stop codon for each genome, but not all genomes use the same stop
 	    print "#Class CE2. Inconsistent stops\n" if($debug);;
 	    $cluster_attrs->{'CE2'}++;
 	}
@@ -1050,20 +1435,21 @@ sub annotateCluster{
 	    print "#Class CE3. Unaligned stops\n" if($debug);;
 	    $cluster_attrs->{'CE3'}++;
 	}
-	
-	#Consider case where we can shift frames and stay open
-	
     }
-    #Save frequency of starts, stops
+    
+    #Save frequency of annotated starts, stops
     foreach my $feat_name (keys %$genes){
+	#$feat_attrs->{$feat_name}->{'pairfreq='.$codonpairs->{"$featstarts->{$feat_name}"."$featstops->{$feat_name}"}}++;
 	if(exists $featstarts->{$feat_name}){
 	    $feat_attrs->{$feat_name}->{'startfreq='.$starts->{$featstarts->{$feat_name}}}++;
+	    $feat_attrs->{$feat_name}->{'startcodon='.$featstarts->{$feat_name}}++;
 	}
 	if(exists $featstops->{$feat_name}){
 	    $feat_attrs->{$feat_name}->{'stopfreq='.$stops->{$featstops->{$feat_name}}}++;
+	    $feat_attrs->{$feat_name}->{'stopcodon='.$featstops->{$feat_name}}++;
 	}
     }
-    return ($feat_attrs,$cluster_attrs,{'starts'=>$seqstarts,'stops'=>$seqstops});
+    return ($feat_attrs,$cluster_attrs,{'starts'=>$seqstarts,'stops'=>$seqstops,'pairs'=>$codonpairs,'featstops'=>$featstops,'featstarts'=>$featstarts});
 }
 
 ###################################
@@ -1099,6 +1485,785 @@ sub annotateSingletons{
     return \@classes;
 }
 
+#Check if fmin-fmax,orient on seqname is a valid ORF
+sub isORF(){
+    my($db,$seqname,$fmin,$fmax,$orient,$fs) = @_;
+    my $seqobj = $db->get_Seq_by_id($seqname);
+    die "Bad coordinates $fmin-$fmax @_" if($fmin >= $fmax);
+    my $codon_table = Bio::Tools::CodonTable->new(-id=>11);
+    if($seqobj){
+	if($orient eq '+'){
+	    die "Bad coordinates $fmax extends past end of sequence" if($fmax >= $seqobj->length());
+            my $seqlen = ($fmax-$fmin);
+	    my $newobjs = $seqobj->trunc($fmin+1,$fmax);
+
+	    my $encoding = 'C'x$newobjs->length();
+	    my $newobj = new Bio::Seq::EncodedSeq(-seq=>$newobjs->seq(),
+						  -encoding=>$encoding);
+	    die if($newobj->length() != $seqlen);
+	    if($codon_table->is_start_codon($newobj->subseq(1,3)) && ($codon_table->is_ter_codon($newobj->subseq($seqlen-3+1,$seqlen)))){
+		my $protein_seq_obj = $newobj->translate(-codontable_id =>11);
+		if($protein_seq_obj->length() == $seqlen/3){
+		    return 1;
+		}
+		else{
+		    print "#Unexpected sequence length ",$protein_seq_obj->length()," expecting ",$seqlen/3," from ORF $seqname $fmin-$fmax $orient\n" if($verbose);
+		}
+	    }
+	    else{
+		print "Possible alternative ORF on $seqname $fmin-$fmax,$orient has invalid start:",$newobj->subseq(1,3)," ",$codon_table->is_start_codon($newobj->subseq(1,3))," or stop:",$newobj->subseq($seqlen-3+1,$seqlen)," ",$codon_table->is_ter_codon($newobj->subseq($seqlen-3+1,$seqlen)),"\n" if($verbose);
+	    }
+	}
+	else{
+	    die if($orient ne '-');
+            my $seqlen = ($fmax-$fmin);
+	    my $newobj = $seqobj->trunc($fmin+1,$fmax);
+	    die if($newobj->length() != $seqlen);
+	    $newobj = $newobj->revcom();
+	    #Check if valid start codon
+	    if($codon_table->is_start_codon($newobj->subseq(1,3)) && ($codon_table->is_ter_codon($newobj->subseq($seqlen-3+1,$seqlen)))){
+		my $protein_seq_obj = $newobj->translate(-codontable_id =>11);
+		
+		if($protein_seq_obj->length() == $seqlen/3){
+		    return 1;
+		}
+		else{
+		    print "#Unexpected sequence length ",$protein_seq_obj->length()," expecting ",$seqlen/3," from ORF $seqname $fmin-$fmax $orient\n" if($verbose);
+		}
+	    }
+	    else{
+		print "Possible alternative ORF on $seqname $fmin-$fmax,$orient has invalid start:",$newobj->subseq(1,3)," ",$codon_table->is_start_codon($newobj->subseq(1,3))," or stop:",$newobj->subseq($seqlen-3+1,$seqlen)," ",$codon_table->is_ter_codon($newobj->subseq($seqlen-3+1,$seqlen)),"\n" if($verbose);
+	    }
+	}
+    }
+    return 0;
+}
+
+#
+#callORF()
+#Attempts to call an ORF using start codon specified by [start-end]
+#Start,end should be codon coordinates relative to the + strand. start<end
+
+#Will attempt to call an ORF on one strand.
+#Leading strand 5'->3' increasing coordinates [start-firstStop] 
+#Lagging strand 5'->3' decreasing coordinates [end-firstStop]
+
+#Will only call ORF if start,end,orient corresponds to an acutal start
+#codon, specified by the configurable codon table
+
+#fsedits is a array reference of signed locations of the frameshift relative to the sequence start
+#eg. +10 is a forward frameshift 10 bp downstream from translation start
+#    -9 is a backward frameshift 9 bp downstream from translation start
+sub callORF{
+    my($seqobj,$codon_start,$codon_end,$orient,$fs) = @_;
+    die "Bad start codon $seqobj:$codon_start-$codon_end $orient" if($codon_end < $codon_start || $codon_end - $codon_start != 3);
+    my $codon_table = Bio::Tools::CodonTable->new(-id=>11);
+    if($seqobj){
+	if($orient eq '+'){
+            my $seqlen = ($seqobj->length()>$MAXORFLEN) ? $codon_start+$MAXORFLEN : $seqobj->length(); 
+	    my $newobjs = $seqobj->trunc($codon_start+1,$seqlen);
+	    my $encoding = 'C'x$newobjs->length();
+
+	    foreach my $fs_loc (@$fs){
+		if(defined $fs_loc){
+		    if($fs_loc>0){
+			print "Encoding a forward frameshift at $fs_loc in ORF of length ",$newobjs->length(),"\n";
+			#a forward frameshift
+			#substr($encoding,$fs_loc,1) = 'F';
+			substr($encoding,$fs_loc,1,'F');
+		    }
+		    else{
+			#a backward frameshift
+			print "Encoding a reverse frameshift at $fs_loc in ORF of length ",$newobjs->length(),"\n";
+			#substr($encoding,($fs_loc*-1),1) = 'B';
+			substr($encoding,($fs_loc*-1),1,'B');
+		    }
+		}
+	    }
+	    die if(length($encoding)!=$newobjs->length());
+	    my $newobj = new Bio::Seq::EncodedSeq(-seq=>$newobjs->seq(),
+						  -encoding=>$encoding);
+
+
+	    #Check if valid start codon
+	    if($codon_table->is_start_codon($newobj->subseq(1,3))){
+		my $protein_seq_obj = $newobj->translate(-orf => 1,
+							 -codontable_id =>11);
+		return ($protein_seq_obj->seq(),$orient);
+	    }
+	    else{
+		print "#callORF trying '-' $seqobj,$codon_start,$codon_end,$orient Bad start codon ",$newobj->subseq(1,3) if($debug);;
+		my $seqlen = ($codon_end>$MAXORFLEN) ? $codon_end-$MAXORFLEN : 1;
+		my $newobj = $seqobj->trunc($seqlen,$codon_end);
+		$newobj = $newobj->revcom();
+		#print " REV:",$codon_table->is_start_codon($newobj->subseq(1,3))," ",$newobj->subseq(1,3),"\n";
+		if($codon_table->is_start_codon($newobj->subseq(1,3))){
+		    my $protein_seq_obj = $newobj->translate(-orf => 1,
+							     -codontable_id =>11);
+		    
+		    return ($protein_seq_obj->seq(),'-');
+		}
+		else{
+		    print "#WARNING: Skipping callORF $seqobj,$codon_start,$codon_end,$orient. '",$newobj->subseq(1,3),"' is not a valid start codon\n" if($debug);
+		}
+	    }		
+	}
+	else{
+	    die if($orient ne '-');
+            my $seqlen = ($codon_end>$MAXORFLEN) ? $codon_end-$MAXORFLEN : 1;
+	    my $newobj = $seqobj->trunc($seqlen,$codon_end);
+	    $newobj = $newobj->revcom();
+	    #Check if valid start codon
+	    if($codon_table->is_start_codon($newobj->subseq(1,3))){
+		my $protein_seq_obj = $newobj->translate(-orf => 1,
+							 -codontable_id =>11);
+		
+		return ($protein_seq_obj->seq(),$orient);
+	    }
+	    else{
+		print "#callORF trying '+' $seqobj,$codon_start,$codon_end,$orient Bad start codon ",$newobj->subseq(1,3) if($debug);;
+		my $seqlen = ($seqobj->length()>$MAXORFLEN) ? $codon_start+$MAXORFLEN : $seqobj->length(); 
+		my $newobj = $seqobj->trunc($codon_start+1,$seqlen);
+		if($codon_table->is_start_codon($newobj->subseq(1,3))){
+		    my $protein_seq_obj = $newobj->translate(-orf => 1,
+							     -codontable_id =>11);
+		    
+		    return ($protein_seq_obj->seq(),'+');
+		}
+		else{
+		    print "WARNING: Skipping callORF $seqobj,$codon_start,$codon_end,$orient. '",$newobj->subseq(1,3),"' is not a valid start codon\n";
+		}
+	    }
+	}
+	    
+    }
+    else{
+	print "#ERROR invalid seq obj $seqobj\n" if($debug);;
+    }
+    return undef;
+}
+#
+#Print members and attributes for a cluster
+#$query is the longest member of a cluster
+#Supported attributes
+sub reportCluster{
+    my($query,$mappedorgs,$mappedgenes,$unmappedgenes,$feat_attrs,$cluster_attrs,$seq_attrs,$new_orfs) = @_;
+    if(scalar(keys %$mappedgenes)>0){
+	if($COGoutputformat){
+	    if(scalar(keys %$mappedgenes)>0){
+		print "COG = $cluster_id, size ",scalar(keys %$mappedgenes), ", connections = 0, perfect = 0;\n";
+		print "\t$features->{$query}->[5]\n";
+		foreach my $organism (sort {$a cmp $b} keys %$mappedorgs){
+		    foreach my $gene (sort {$features->{$a}->[1] <=> $features->{$b}->[1]} (keys %{$mappedorgs->{$organism}->{'features'}})){
+			if($gene ne $query){
+			    print "\t$features->{$gene}->[5]\n";
+			}
+		    }
+		}
+	    }
+	}
+	else{
+	    my $classesstr = join(';',sort {$a cmp $b} keys %{$cluster_attrs});
+	    print ">CLUSTER_$cluster_id num_seqs=",scalar(keys %$mappedorgs)," num_genes=",scalar(keys %$mappedgenes);
+	    if(exists $mappedgenes->{$query}->{'alignments'}){
+		print " num_alignments=",scalar(@{$mappedgenes->{$query}->{'alignments'}})," classes=$classesstr query=$query alignments=",join(',',@{$mappedgenes->{$query}->{'alignments'}});
+	    }
+	    print "\n";
+	    print CFILE ">CLUSTER_$cluster_id num_seqs=",scalar(keys %$mappedorgs)," num_genes=",scalar(keys %$mappedgenes), " classes=$classesstr query=$query\n";
+
+	    my $qfmin = $features->{$query}->[1];
+	    my $qfmax = $features->{$query}->[2];
+	    my $qseqname = $features->{$query}->[0];
+	    my @mappedfeats;
+	    foreach my $organism (sort {$a cmp $b} keys %$mappedorgs){
+		my($start,$end) = &getspan($mappedgenes,keys %{$mappedorgs->{$organism}->{'features'}});
+		my @ogenes = sort {$features->{$a}->[1] <=> $features->{$b}->[1]} (keys %{$mappedorgs->{$organism}->{'features'}});
+		my @ocovs = map {sprintf("%.2f",$mappedgenes->{$_}->{'cov'}/$features->{$_}->[3])} (@ogenes); #%coverage over gene length
+		my @oids  = map {sprintf("%.2f",$mappedgenes->{$_}->{'pid'}/$mappedgenes->{$_}->{'len'})} (@ogenes); #%id over aligned length
+		my $classes;
+		my $longestorf=0;
+		my $longestpairc=0;
+		foreach my $gene (@ogenes){
+		    if(exists $feat_attrs->{$gene}){
+		      foreach my $c (sort {$a cmp $b} keys %{$feat_attrs->{$gene}}){
+			  #hack
+			 if($c eq 'pairfreq'){
+			     $classes->{'pairfreq='.$feat_attrs->{$gene}->{$c}}++;
+			 }
+			 else{
+			     $classes->{$c}++;
+			 }
+		      }
+                    }
+		    $longestorf = ($features->{$gene}->[3] > $longestorf) ? $features->{$gene}->[3] : $longestorf;
+		    $longestpairc = ($feat_attrs->{$gene}->{'pairfreq'} > $longestpairc) ? $feat_attrs->{$gene}->{'pairfreq'} : $longestpairc;
+		}
+		##
+		#Report alternative start sites if they result in a longer ORF
+		my @attrs = sort {$a cmp $b} keys %$classes;
+
+		if(exists  $seq_attrs->{$organism}){
+		    my $orfidx=0;
+		    foreach my $alt (@{$seq_attrs->{$organism}}){
+			#Report alternative starts or possible frameshifts
+			if($alt =~ /alt_start/ || $alt =~ /alt_fs/){
+			    #Only report if results in a longer ORF
+			    my($astart,$aend) = ($alt =~ /alt_start=(\d+)-(\d+)/);
+			    my($len) = ($alt =~ /len:(\d+)/);
+			    my($orient) = ($alt =~ /orient:([\+\-])/);
+			    my($apairfreq) = ($alt =~ /pairfreq:(\d+)/);
+			    if(!$longer_altstarts || $len>=$longestorf){
+				if(!$moreconsistent_altstarts || $apairfreq>=$longestpairc){
+				    push @attrs,$alt;
+				    push @mappedfeats,[[[$organism,$astart,$aend,$orient,($aend-$astart).'M']],"ALTgene$organism$orfidx",'gene'];
+				    $orfidx++;
+				    if($organism eq $qseqname){
+					$qfmin = ($astart < $qfmin) ? $astart : $qfmin;	
+					$qfmax = ($aend > $qfmax) ? $aend : $qfmax;
+				    }
+				}
+				else{
+				    print "#Skipping $alt codon freq $apairfreq<$longestpairc\n" if($debug);;
+				}
+			    }
+			    else{
+				print "#Skipping $alt len $len<$longestorf\n" if($debug);;
+			    }
+			}
+			else{
+			    print "#Unknown $alt" if($debug);;
+			}
+		    }
+		}
+
+		my @orients;
+		my @names;
+		foreach my $gene (@ogenes){
+		    push @orients,"$features->{$gene}->[4]";
+		    push @attrs,"aln_orient=$mappedgenes->{$gene}->{'relorient'}";
+		    my $frame;
+		    if($features->{$gene}->[4] eq '-'){
+			$frame=($end%3)*-1;
+		    }
+		    else{
+			$frame=$start%3;
+		    }
+		    push @attrs,"frame=$frame";
+		    if(defined $features->{$gene}->[11]){
+			push @names,"product=$features->{$gene}->[11]";
+		    }
+		}
+
+		#Brief cluster output
+		print CFILE join(',',@ogenes),
+		"\tWGA$cluster_id",
+		"\t$organism",
+		"\tcov=",join(',',@ocovs),
+		"\tpid=",join(',',@oids),
+		"\tqcov=",sprintf("%.2f",$mappedorgs->{$organism}->{'qcov'}/($qfmax-$qfmin)),
+		"\t$start-$end",
+		"\t",join(',',@orients),
+		"\t",$end-$start,
+		"\t",join(',',@names),
+		"\n";
+
+		#Detailed output
+		print join(',',@ogenes),
+		"\tWGA$cluster_id",
+		"\t$organism",
+		"\tcov=",join(',',@ocovs),
+		"\tpid=",join(',',@oids),
+		"\tqcov=",sprintf("%.2f",$mappedorgs->{$organism}->{'qcov'}/($qfmax-$qfmin)),
+		"\t$start-$end",
+		"\t",join(',',@orients),
+		"\t",$end-$start,
+		"\t",join(';',@attrs,@names),
+		"\n";
+	    }
+	    
+	    ##
+	    #Report ORFs that are conserved and aligned but not annotated
+# 	    foreach my $organism (keys %$new_orfs){
+# 		my $orfidx=0;
+# 		foreach my $alt (@{$new_orfs->{$organism}}){
+# 		    die if(exists $mappedorgs->{$organism});
+# 		    my($astart,$aend) = ($alt =~ /alt_start=(\d+)-(\d+)/);
+# 		    my($len) = ($alt =~ /len:(\d+)/);
+# 		    my($orient) = ($alt =~ /orient:([\+\-])/);
+# 		    die "Mismatching lengths $len != $aend - $astart" if($len != ($aend-$astart));
+# 		    #Check that this ORF is longer than genes that are already annotated on $organism in this region
+# 		    my @unmappedlist;
+# 		    foreach my $feat_name (keys %$unmappedgenes){
+# 			if($feat2organism->{$feat_name} eq $organism){
+# 			    push @unmappedlist,[$feat_name,$features->{$feat_name}->[3]];
+# 			}
+# 		    }
+# 		    my @longestunmapped = sort {$b->[1] <=> $a->[1]} @unmappedlist;
+# 		    if(scalar (%$unmappedgenes) ==0 || $len > $longestunmapped[0]){
+# 			push @mappedfeats,[[[$organism,$astart,$aend,'+',($aend-$astart).'M']],"NEWORF$organism$orfidx",'gene'];
+# 			print "NEWORF$organism$orfidx",
+# 			"\tWGA$cluster_id",
+# 			"\t$organism",
+# 			"\tcov=",
+# 			"\tpid=",
+# 			"\t$astart-$aend",
+# 			"\t",$aend-$astart,
+# 			"\t",join(';',@{$new_orfs->{$organism}}),
+# 			"\n";
+# 			$orfidx++;
+# 		    }
+# 		}
+# 	     }
+	    if($printalignments){
+		print "#Printing query $query $qseqname,$qfmin,$qfmax\n" if($debug);
+		my @isect = $atree->map($qseqname,$qfmin,$qfmax,"alignment");
+		#Print all features overlapping the alignment window.
+		#This may include addl features than those in the cluster
+		my $printedfeats = {};
+		foreach my $feat (@isect){
+		    my $feat_name = $feat->[0];
+		    $feat_name =~ s/gene\://;
+		    $printedfeats->{$feat_name}++;
+		}
+		foreach my $feat_name (keys %$printedfeats){
+		    my $fmin = $features->{$feat_name}->[1];
+		    my $fmax = $features->{$feat_name}->[2];
+		    my $seqname = $features->{$feat_name}->[0];
+		    my $orient = $features->{$feat_name}->[4];
+		    if(exists $mappedgenes->{$feat_name}){
+			push @mappedfeats,[[[$seqname,$fmin,$fmax,$orient,($fmax-$fmin).'M']],'gene:'.$feat_name,'gene'];
+		    }
+		    else{
+			#print "#WARNING Expected gene $feat_name in unmapped list: ".join(',',keys %$unmappedgenes)."\n" if(!exists $unmappedgenes->{$feat_name});
+			if(exists $features->{$feat_name} && $features->{$feat_name}->[3]){
+			    my $cov = sprintf("c%.1f,i%.1f ",$unmappedgenes->{$feat_name}->{'cov'}/$features->{$feat_name}->[3],
+					      $unmappedgenes->{$feat_name}->{'pid'}/$features->{$feat_name}->[3]);
+			    push @mappedfeats,[[[$seqname,$fmin,$fmax,$orient,($fmax-$fmin).'M']]," $cov *gene:".$feat_name.":$orient",'gene'];
+			}
+		    }
+		}
+
+                #Sort all alignments that span query gene
+		my @qryalns;
+		foreach my $align_name (@{$mappedgenes->{$query}->{'alignments'}}){
+		    my $alni = $atree->getAlignedInterval($align_name,$feat2organism->{$query}) if($debug);
+		    print "#QRYALN $align_name $alni->[1]\n" if($debug);
+		    push @qryalns,[$align_name,$alni->[1]];
+		}
+		my @qryalns_sorted = sort {$a->[1] <=> $b->[1]} @qryalns;
+		foreach my $a (sort {$a->[1] <=> $b->[1]} @qryalns){
+		    my($align_name) = @$a;
+		    #Check that new range is still within $alignment
+		    print "#Checking the $qseqname,$qfmin,$qfmax,$align_name is within range\n" if($debug);;
+		    my @isect = $atree->intersect($qseqname,$qfmin,$qfmax,$align_name);
+		    my $printfmin;
+		    my $printfmax;
+		    foreach my $aln (@isect){
+			if($aln->[1] eq $qseqname && $aln->[0] eq $align_name){
+			    #print join(',',@$aln),"\n";
+			    $printfmin = $aln->[2];
+			    $printfmax = $aln->[3];
+			    print "#Resetting print range to $printfmin-$printfmax from $qfmin-$qfmax\n" if($debug);
+			}
+		    }
+		    if(defined $printfmin && defined $printfmax){
+			print "CLUSTER_$cluster_id ALIGNMENT:$align_name\n";
+			my($colstart,$colend) = AlignmentTree::coordstocolumn($atree->{_alignments}->{$align_name}->[0],$qseqname,$printfmin,$printfmax);
+			$atree->printAlignment($align_name,$colstart,$colend,$db,\@mappedfeats);
+		    }
+		    else{
+			die;
+		    }
+		}
+	    }
+	    print "\n";
+	}
+    }
+    else{
+	#No genes in cluster
+	die;
+    }
+}
+
+sub findSingletons{
+    my($atree,$mapped,$unmapped,$subsumed) = @_;
+    my $singletons = {};
+    foreach my $feat_name (keys %$features){
+	my $fmin = $features->{$feat_name}->[1];
+	my $fmax = $features->{$feat_name}->[2];
+	if(! exists $mapped->{$feat_name}){
+	    die if(exists $mapped->{$feat_name});
+	    my $classes = &annotateSingletons($atree,$features->{$feat_name}->[0],$feat_name,$fmin,$fmax);
+	    if(exists $unmapped->{$feat_name}){
+		my $query=$feat_name;
+		my($mappedorgs,$mappedgenes,$unmappedorgs,$unmappedgenes) = &buildCluster($atree,$query);
+		my($feat_attrs,$cluster_attrs,$codons) = &annotateCluster($atree,$mappedgenes,$mappedorgs);
+		my $new_orfs = &findnewORFs($db,$atree,$mappedorgs,$mappedgenes,$codons);
+		if(scalar(keys %$new_orfs)){
+		    my $seq_attrs = {};	 
+		    &reportCluster($query,$mappedorgs,$mappedgenes,$unmappedgenes,$feat_attrs,$cluster_attrs,$seq_attrs,$new_orfs);
+		    $cluster_id++;
+		}
+		my $featlen = $fmax-$fmin;
+		my $mappedlen = $unmapped->{$feat_name}->{'len'};
+		if($featlen <= 0){
+		    print STDERR "#Bad featlen for feature $feat_name $fmax-$fmin\n";
+		    $featlen=1;
+		}
+		if($mappedlen <= 0){
+		    print STDERR "#Bad coverage for feature $feat_name Coverage:$unmapped->{$feat_name}->{'len'}\n";
+		    $mappedlen=1;
+		}
+		my ($seqname,$fmin,$fmax,$len,$orient) = @{$features->{$feat_name}};
+		if($COGoutputformat){}
+		else{
+		    print "#SINGLETON $feat_name len:$features->{$feat_name}->[3]\tbest_cluster:$unmapped->{$feat_name}->{'WGA_cluster'}\tcov:";
+		    #printf("%.2f",$unmapped->{$feat_name}->{'cov'}/$featlen);
+		    printf("%.2f",$unmapped->{$feat_name}->{'cov'});
+		    print " pid:";
+		    #printf("%.2f",$unmapped->{$_}->{'pid'}/$mappedlen);
+		    printf("%.2f",$unmapped->{$feat_name}->{'pid'});
+		    printf(" lenbp:%f ",$mappedlen);
+		    join(' ',@$classes);
+		    if(defined $features->{$feat_name}->[11]){
+			print " product=$features->{$feat_name}->[11]";
+		    }
+		    print "\n";
+		}
+	    }
+	    else{
+		if(exists $subsumed->{$feat_name}){
+		    print "#DELETED $feat_name\n";
+		}
+		else{
+		    if($COGoutputformat){}
+		    else{
+			print "#SINGLETON $feat_name len:$features->{$feat_name}->[3] ",join(' ',@$classes);
+			if(defined $features->{$feat_name}->[11]){
+			    print " product=$features->{$feat_name}->[11]";
+			}
+			print "\n";
+		    }
+		    $nohit++;
+		    $singletons->{$feat_name}++;
+		}
+	    }
+	}
+	else{
+	    #Mapped ORF, not a singleton
+	}
+    }
+
+    return $singletons;
+}
+
+
+###############################
+#General utility funcs
+sub getspan{
+    my($features) = shift;
+    my @coords;
+    foreach my $gene (@_){
+	push @coords,$features->{$gene}->{'fmin'},$features->{$gene}->{'fmax'};
+    }
+    my @sortedcoords = sort {$a <=> $b} @coords;
+    return ($sortedcoords[0],$sortedcoords[$#coords]);
+}
+
+
+sub findCoords{
+    my($atree,$seqname,$startcodon,$stopcodon) = @_;
+    
+    #$codon is a tuple of alignment,aligned_column
+    my($startcol,$aln_s) = split(/$CODON_DELIM_REGEX/,$startcodon);
+    #find corresponding stop
+    my($stopcol,$aln_e) = split(/$CODON_DELIM_REGEX/,$stopcodon);
+    
+    my $si = &getAlignment($atree,$aln_s,$seqname);
+    my $ei = &getAlignment($atree,$aln_e,$seqname);
+    my $start_s;
+    my $start_e;
+    my $stop_s;
+    my $stop_e;
+    if($si){
+	($start_s,$start_e) = AlignmentTree::columntocoords($si,$startcol,$startcol+2);
+	if($ei){
+	    ($stop_s,$stop_e) = AlignmentTree::columntocoords($ei,$stopcol,$stopcol+2);
+	}
+	else{
+	    print "Can't find alignment $aln_s on $seqname from $startcodon\n" if($debug);
+	    return undef;
+	}
+    }
+    else{
+	print "Can't find alignment $aln_s on $seqname from $startcodon\n" if($debug);
+	return undef;
+    }
+    if($start_s<$stop_s){
+	#forward strand 5'start -----> 3'stop
+	return ($start_s,$stop_e,'+');
+    }
+    else{
+	#reverse strand
+	#3'stop <-- 5'start
+	return ($stop_s,$start_e,'-');
+    }
+    return undef;
+}
+
+#Returns aligned location of start and stop codons
+#If annotation is not a valid start or stop codons returns -1
+#If codon is not aligned returns undef
+sub findCodons{
+    my($atree,$seqname,$fmin,$fmax,$orient,$fname) = @_;
+    #my($name,$seq,$start,$end,$coverage,$qpid) = @$aln;
+    my $codon_table = Bio::Tools::CodonTable->new(-id=>11);
+    my $seqobj = $db->get_Seq_by_id($seqname);
+    if(!$seqobj){
+	print "Can't find $seqname\n";
+	return;
+    }
+    my $startcodon=undef;
+    my $stopcodon=undef;
+    my $is_partial_start=0;
+    my $is_partial_stop=0;
+    my $aln_orient=undef;
+    if($orient eq '+'){
+	if(!$codon_table->is_start_codon($seqobj->subseq($fmin+1,$fmin+2+1))){ #bioperl is 1-base coordinates
+	    print "#Bad start codon $fname,$seqname,$fmin,$fmax,$orient codon $fmin+1,$fmin+2+1 ",$seqobj->subseq($fmin+1,$fmin+2+1)," aln_orient:$aln_orient\n" if($verbose || $debug);
+	    return -1;
+	} 
+	else{
+	    #Find start codon + strand
+	    $startcodon = &getAlignedCols($atree,$seqname,$fmin,$fmin+3);
+	}
+	
+	if(!$codon_table->is_ter_codon($seqobj->subseq($fmax-3+1,$fmax))){
+	    print "#Bad stop $fname,$seqname,$fmin,$fmax,$orient codon $fmax-3+1,$fmax ",$seqobj->subseq($fmax-3+1,$fmax)," aln_orient:$aln_orient\n" if($verbose || $debug);
+	    return -1;
+	}
+	else{
+	    #Find stop codon - strand
+	    $stopcodon = &getAlignedCols($atree,$seqname,$fmax-3,$fmax);
+	}
+	#Check if in pmark spacer adjacent to contig boundary
+	my $startregion = $seqobj->subseq($fmin-length($PMARK_SPACER),$fmin+length($PMARK_SPACER));
+	my $stopregion = $seqobj->subseq($fmax-length($PMARK_SPACER),$fmax+length($PMARK_SPACER));
+	if($startregion =~ /$PMARK_SPACER/){
+	    $is_partial_start=1;
+	}
+	if($stopregion =~ /$PMARK_SPACER/){
+	    $is_partial_stop=1;
+	}
+	
+    }
+    else{
+	die "Bad orient $orient" if($orient ne '-');
+	if(!$codon_table->is_start_codon(revcom($seqobj->subseq($fmax-3+1,$fmax))->seq())){
+	    print "#Bad start codon $fname,$seqname,$fmin,$fmax,$orient codon $fmax-3+1,$fmax ",revcom($seqobj->subseq($fmax-3+1,$fmax))->seq()," aln_orient:$aln_orient\n" if($verbose || $debug);
+	    return -1;
+	} 
+	else{
+	    #Find start codon on - strand
+	    $startcodon = &getAlignedCols($atree,$seqname,$fmax-3,$fmax);
+	}
+	if(!$codon_table->is_ter_codon(revcom($seqobj->subseq($fmin+1,$fmin+3))->seq())){
+	    print "#Bad stop codon $fname,$seqname,$fmin,$fmax,$orient codon $fmin+1,$fmin+3 ",revcom($seqobj->subseq($fmin+1,$fmin+3))->seq()," aln_orient:$aln_orient\n" if($verbose || $debug);
+	    return -1;
+	} 
+	else{
+	    #Find stop codon on - strand
+	    $stopcodon = &getAlignedCols($atree,$seqname,$fmin,$fmin+3);
+	}
+        #Check if in pmark spacer adjacent to contig boundary
+	my $stopregion = $seqobj->subseq($fmin-length($PMARK_SPACER),$fmin+length($PMARK_SPACER));
+	my $startregion = $seqobj->subseq($fmax-length($PMARK_SPACER),$fmax+length($PMARK_SPACER));
+	if($startregion =~ /$PMARK_SPACER/){
+	    $is_partial_start=1;
+	}
+	if($stopregion =~ /$PMARK_SPACER/){
+	    $is_partial_stop=1;
+	}
+    }
+    return ($startcodon,$stopcodon,$is_partial_start,$is_partial_stop);
+}
+
+
+sub getAlignment{
+    my($atree,$align_name,$seqname) = @_;
+    my $alignment = $atree->{_alignments}->{$align_name}->[0];
+    foreach my $i (@$alignment){
+	if($i->[0] eq $seqname){
+	    return $i;
+	}
+    }
+    print "#Can't find $seqname on alignment $align_name\n" if($debug);
+    return undef;
+}
+
+#Look for indels in alignment columns [$codon-$offset,$codon+2]
+#Refseq is optional, otherwise uses most frequently occuring allele as reference
+#Returns
+#[coord,refchar,qrychar,column,frame]
+sub reportVariants{
+    my($atree,$db,$aln,$seq,$startcol,$endcol,$refseq) = @_;
+    my $skipgapcheck=0;
+    my $GAPWINDOW=10;
+    die if($endcol<$startcol);
+    print "#Analyzing codon position $startcol in alignment $aln seq $seq \n" if($debug);
+
+    print "#Retrieving alignment matrix for $startcol-$endcol for alignment $aln \n" if($debug);
+    my ($mmatrix,$seqmatrix,$names) = $atree->getAlignmentMatrix($aln,$startcol,$endcol,$db);
+    print "#Expecting width ",($endcol-$startcol+1)," row count ",scalar(@$mmatrix)," ",scalar(@$names),"\n" if($debug);
+    
+    #List of columns with variants
+    my $results = {};
+    my @edits;
+
+    my $qryidx;
+    #For optional reference seq
+    my $refidx=-1;
+
+    my $width;
+    for(my $i=0;$i<@$mmatrix;$i++){
+	if($names->[$i] eq $seq){
+	    $qryidx = $i;
+	}
+	if(defined $refseq && $names->[$i] eq $refseq){
+	    $refidx = $i;
+	}
+    }
+    #Matrix cols start at 0
+    for(my $j=0;$j<($endcol-$startcol+1);$j++){
+	if(defined $refseq){
+	    if(uc(substr($mmatrix->[$refidx],$j,1)) ne uc(substr($mmatrix->[$qryidx],$j,1))){
+		$results->{$j}++;
+	    }
+	}
+	else{
+	    for(my $i=0;$i<@$mmatrix;$i++){
+		if(substr($mmatrix->[$i],$j,1) ne '.'){
+		    if($skipgapcheck || substr($mmatrix->[$i],$j,$GAPWINDOW) =~ /\./ ){ #gap < GAPWINDOW
+			#column $i has multiple characters, gaps or mutations
+			print "#MUT $i $j ",substr($mmatrix->[$i],$j,1)," $names->[$i] $seq\n" if($debug);
+			$results->{$j}++;
+		    }
+		}
+	    }
+	}
+    }
+    foreach my $r (keys %$results){
+	my $reloffset = $startcol+$r;
+	my $freqchar = {};
+	my $refchar;
+	my $qrychar;
+	if(defined $refseq){
+	    $qrychar = substr($mmatrix->[$qryidx],$r,1);
+	    $refchar = substr($mmatrix->[$refidx],$r,1);
+	}
+	else{
+	    for(my $i=0;$i<@$mmatrix;$i++){
+		
+		my $char;
+		#TODO this is slow, improve perf
+		if(substr($mmatrix->[$i],$r,1) eq '-'){
+		    #gap
+		    $char = substr($mmatrix->[$i],$r,1);
+		    #die "Unexpected char $i $r $seqmatrix->[$i]->[$r] $mmatrix->[$i]->[$r]" if(defined $seqmatrix->[$i]->[$r]);
+		}
+		else{
+		    #retrieve base
+		    $char = substr($seqmatrix->[$i],$r,1);
+		}
+		die "Bad char '$char'" if(length($char)!=1);
+		$freqchar->{$char}++;
+	    }
+	}
+	my $alni = &getAlignment($atree,$aln,$seq);
+	my($fsstart,$fsend) = AlignmentTree::columntocoords($alni,$reloffset,$reloffset);
+	my $fstype = 0;
+
+	if(defined $refseq){
+	    if(uc($refchar) ne uc($qrychar)){
+		if($refchar eq '-'){
+		    $fstype=1;
+		}
+		elsif($qrychar eq '-'){
+		    $fstype=-1;
+		}
+		else{
+		    $fstype=0;
+		}
+		#Ignore point mutations for now
+		if($fstype!=0){
+		    print "#ALT col:$reloffset coord:$fsstart-$fsend base:$refchar freq:$freqchar->{$refchar} $seq:$qrychar $freqchar->{$qrychar} fstype:$fstype\n" if($debug);
+		    push @edits,[$fsstart,$refchar,$qrychar,$reloffset,$fstype];
+		}
+	    }
+	}
+	else{
+	    die;
+	    #report most frequent character
+	    my @sortedchars = sort {$b <=> $a} (keys %$freqchar);
+	    #retrieve coordinate on $seq for reloffset
+	    foreach my $base (@sortedchars){
+		if(uc($base) ne uc($qrychar)
+		   #&& $freqchar->{$base}>=$freqchar->{$qrychar}	    #only consider bases that occur more frequently than 
+		   #&& $freqchar->{$base}>=scalar(@$mmatrix)/2){  	    #optionally also in majority of sequences
+		   ){
+		    if($base eq '-'){
+			$fstype=1;
+		    }
+		    elsif($qrychar eq '-'){
+			$fstype=-1;
+		    }
+		    else{
+			$fstype=0;
+		    }
+		    print "#ALT col:$reloffset coord:$fsstart-$fsend base:$base freq:$freqchar->{$base} $seq:$qrychar $freqchar->{$qrychar} fstype:$fstype\n" if($debug);
+		    push @edits,[$fsstart,$base,$qrychar,$reloffset,$fstype];
+		}
+		else{
+		    #last;#can shortcircuit, only consider more frequent bases
+		}
+	    }
+	}
+    }
+    return \@edits;
+}
+
+#Returns the overlapping alignment and start-end column for a sequence range
+#Inputs
+#getAlignedCols(seq,fmin,fmax)
+#Returns [start_colnum,alignment_obj,end_colnum,matching_bits]
+sub getAlignedCols{
+    my($atree,$seqname,$fmin,$fmax) = @_;
+    my $ret;
+    my @alignments = $atree->intersect($seqname,$fmin,$fmax,$aligntoken);
+    my $found=0;
+    foreach my $aln (@alignments){
+	if($seqname eq $aln->[1]){
+	    my $align_name = $aln->[0];
+	    my $align_start = $aln->[2];
+	    my $align_end = $aln->[3];
+	    die "Bad alignment name $align_name" if(!exists $atree->{_alignments}->{$align_name});
+	    die "Mis-mathed orient $aln->[6] ne $aln->[7]" if($aln->[7] ne $aln->[6]);
+	    my $alni = $atree->{_alignments}->{$align_name}->[0];
+	    if($align_start == $fmin && $fmax == $align_end){
+		if($found){
+		    print "#WARNING Overlapping aligned region found for $seqname,$fmin,$fmax. $align_name and $ret->[1]\n" if($verbose);
+		}
+		my @res= AlignmentTree::coordstocolumn($alni,$seqname,$fmin,$fmax);
+		$ret = [$res[0],$align_name,$res[1],$res[2]];
+		$found=1;
+	    }
+	}
+    }
+    return $ret;
+}
+
+################
+#DEPRECATED CODE
 ##############################
 #Print alternative start sites
 #
@@ -1110,6 +2275,7 @@ sub annotateSingletons{
 sub checkStarts{
     my ($db,$codons,$seqs,$seq_attrs) = @_;
 
+    my $altorfs;
     #Save list of all start codons $codon->$freq
     my $starts = {};
     my $stops = {};
@@ -1129,11 +2295,11 @@ sub checkStarts{
     foreach my $seqname (@{$seqs}){
 	#Consider all codons that are not currently annotated on this sequence
 	foreach my $codon (keys %$starts){
-	    if(! exists $codons->{'starts'}->{$seqname}->{$codon}){ #$codon is not annotated on $seqname
+	    if(! exists $codons->{'starts'}->{$seqname}->{$codon}){ #start codon is not annotated on $seqname
 		print "#CODON $codon not annotated on $seqname\n" if($debug);;
 		#check if $codon is aligned
 		#$codon is a tuple of alignment,aligned_column
-		my($col,$aln) = split(/\?/,$codon);
+		my($col,$aln) = split(/$CODON_DELIM_REGEX/,$codon);
 		my $gapped=1; #isgapped
 		#check is $col,$col+3 is gapped, return start coordinate on the genome
 		my $i = &getAlignment($atree,$aln,$seqname);
@@ -1147,16 +2313,16 @@ sub checkStarts{
 			#save and report it. save frequency
 			if($db){
 			    my $orient = $i->[3];
-			    print "#Looking for ORF $start,$end,$orient\n" if($debug);
+			    print "#Looking for ORF $start,$end,$orient on $seqname\n" if($debug);
 			    my $seqobj = $db->get_Seq_by_id($seqname);
 			    if($seqobj){
 				die "Can't find sequence $seqname obj:$seqobj" if(!defined $seqobj);
 				my ($neworf,$callorient) = &callORF($seqobj,$start,$end,$orient);
 				if(length($neworf)>$MINORF){
 				    print "#Calling ORF on strand $callorient start coord = $start\n" if($debug);;
-				    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'freq'} = $starts->{$codon};
-				    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'neworf'} = $neworf;
-				    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'orient'} = $callorient;
+				    #$codons->{'alt_starts'}->{$seqname}->{$codon}->{'freq'} = $starts->{$codon};
+				    #$codons->{'alt_starts'}->{$seqname}->{$codon}->{'neworf'} = $neworf;
+				    #$codons->{'alt_starts'}->{$seqname}->{$codon}->{'orient'} = $callorient;
 				    my $fmin;
 				    my $fmax;
 				    if($callorient eq '+'){
@@ -1167,40 +2333,60 @@ sub checkStarts{
 					$fmin=$end-(length($neworf)*3);
 					$fmax=$end;
 				    }
-				    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'start'} = $fmin;
-				    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'end'} = $fmax;
+				    if(!$fmin || $fmin<0){
+					print STDERR "Bad ORF call on $seqname $start,$end converted to $fmin,$fmax\n";
+					next;
+				    }
+				    #$codons->{'alt_starts'}->{$seqname}->{$codon}->{'start'} = $fmin;
+				    #$codons->{'alt_starts'}->{$seqname}->{$codon}->{'end'} = $fmax;
 				    my($strc,$stpc) = &findCodons($atree,
 								  $seqname,
 								  $fmin,
 								  $fmax,
 								  $callorient);
-				    if($callorient eq '-'){
-					($strc,$stpc) = ($stpc,$strc);
-				    }
+				    #if($callorient eq '-'){
+				#	($strc,$stpc) = ($stpc,$strc);
+					
+				#    }
+				    my $startcodon;
+				    my $stopcodon;
 				    if(ref $strc){
 					my($mcol,$align_name) = (@$strc);
-					my $startcodon = $mcol.'?'.$align_name;
+					$startcodon = $mcol.$CODON_DELIM.$align_name;
 					#die "Can't find start $mcol,$align_name $callorient,$orient from $seqname $codon" if(!exists $starts->{$startcodon});
-					if(!exists $starts->{$startcodon}){
-					    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'startfreq'} = 0;
-					}
-					else{
-					    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'startfreq'} = $starts->{$startcodon};
-					}
-					$codons->{'alt_starts'}->{$seqname}->{$codon}->{'startcol'} = $mcol;
+					#if(!exists $starts->{$startcodon}){
+					#    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'startfreq'} = 0;
+					#}
+					#else{
+					#    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'startfreq'} = $starts->{$startcodon};
+					#}
+					#$codons->{'alt_starts'}->{$seqname}->{$codon}->{'startcol'} = $mcol;
+					#$codons->{'alt_starts'}->{$seqname}->{$codon}->{'startcodon'} = $startcodon;
 				    }
 				    if(ref $stpc){
 					my($mcol,$align_name) = (@$stpc);
-					my $stopcodon = $mcol.'?'.$align_name;
+					$stopcodon = $mcol.$CODON_DELIM.$align_name;
 					#die "Can't find stop $mcol,$align_name $callorient,$orient from $seqname $codon" if(!exists $stops->{$stopcodon});
-					if(!exists $stops->{$stopcodon}){
-					    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'stopfreq'} = 0;
-					}
-					else{
-					    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'stopfreq'} = $stops->{$stopcodon};					
-					}
-					$codons->{'alt_starts'}->{$seqname}->{$codon}->{'stopcol'} = $mcol;
+					#if(!exists $stops->{$stopcodon}){
+					#    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'stopfreq'} = 0;
+					#}
+					#else{
+					#    $codons->{'alt_starts'}->{$seqname}->{$codon}->{'stopfreq'} = $stops->{$stopcodon};					
+					
+				        #}
+					#$codons->{'alt_starts'}->{$seqname}->{$codon}->{'stopcol'} = $mcol;
+					#$codons->{'alt_starts'}->{$seqname}->{$codon}->{'stopcodon'} = $stopcodon;
 				    }
+				    #Save start,stop pair
+				    if($startcodon && $stopcodon){
+					#$codons->{'pairs'}->{$startcodon.':'.$stopcodon}->{'gfreq'}++;
+					#$codons->{'pairs'}->{$startcodon.':'.$stopcodon}->{'length'} += ($fmax-$fmin);
+					#$codons->{'pairs'}->{$startcodon.':'.$stopcodon}->{'orgs'}->{$seqname} = [$fmin,$fmax,0];
+					push @$altorfs,[$seqname,$fmin,$fmax,$callorient,$startcodon,$stopcodon];
+				    }
+				}
+				else{
+				    print "Skipping short ORF ",length($neworf)," <$MINORF $start,$end,$orient\n" if($debug);
 				}
 			    }
 			    else{
@@ -1222,34 +2408,67 @@ sub checkStarts{
 	    }
 	}
     }
-    #Report alternative start codons in decreasing order of use
-    foreach my $seqname (keys %{$codons->{'alt_starts'}}){
-	if(exists $codons->{'alt_starts'}->{$seqname}){
-	    foreach my $codon (
-			       sort{ #frequency of annotation in the alignment
-				   $codons->{'alt_starts'}->{$seqname}->{$b}->{'freq'} <=> $codons->{'alt_starts'}->{$seqname}->{$b}->{$a}->{'freq'}
-			       } 
-			       keys %{$codons->{'alt_starts'}->{$seqname}}){
-		my $althash = $codons->{'alt_starts'}->{$seqname}->{$codon};
-		print "#Alt start $seqname start=$codon " if($debug);;
-		print "freq=$althash->{'freq'} orient=$althash->{'orient'} start=$althash->{'start'} end=$althash->{'end'}\n" if($debug);;
-		if(!exists $seq_attrs->{$seqname}){
-		    $seq_attrs->{$seqname} = [];
+    return $altorfs;
+}
+
+
+sub findNearestNeighbor{
+    my($atree,$seqname,$neighborseqs,$startcodon,$stopcodon) = @_;
+    #Short circuit for testing, return any neighbor
+    return @$neighborseqs[0];
+}
+
+sub reportFrameShifts{
+    my($atree,$db,$seqname,$nearestseq,$startcodon,$stopcodon) = @_;
+    #$codon is a tuple of alignment,aligned_column
+    my($startcol,$aln_s) = split(/$CODON_DELIM_REGEX/,$startcodon);
+    #find corresponding stop
+    my($stopcol,$aln_e) = split(/$CODON_DELIM_REGEX/,$stopcodon);
+    my $si = &getAlignment($atree,$aln_s,$seqname);
+    my $ei = &getAlignment($atree,$aln_e,$seqname);
+    my($startcoord) = AlignmentTree::columntocoords($si,$startcol,$startcol);
+    my($stopcoord) = AlignmentTree::columntocoords($ei,$stopcol,$stopcol);
+
+    #Make sure we have not traversed a rearrangement
+    if(abs($stopcoord-$startcoord)<$MAXORFLEN){
+	
+	my $fsvars;
+	my $netfs = 0;
+		
+	#TODO, relax to allow multiple spanning alignments
+	print "#Looking for frameshifts in $startcodon,$stopcodon $aln_s $aln_e $startcoord $stopcoord\n" if($debug);
+	my @sortedproj;
+	if($startcoord < $stopcoord){
+	    my @proj = $atree->intersect($seqname,$startcoord,$stopcoord,'WGA');
+	    @sortedproj = sort {$a->[2] <=> $b->[2]} @proj;
+	}
+	else{
+	    my @proj = $atree->intersect($seqname,$stopcoord,$startcoord,'WGA');
+	    @sortedproj = sort {$b->[3] <=> $a->[3]} @proj;
+	}
+	print "#Found ",scalar(@sortedproj)," alignments\n" if($debug);
+	foreach my $aln (@sortedproj){
+	    if($aln->[1] eq $seqname){
+		my ($startcol,$stopcol) = AlignmentTree::coordstocolumn($atree->{_alignments}->{$aln->[0]}->[0],$seqname,$aln->[2],$aln->[3]);
+		my $sv = &reportVariants($atree,$db,$aln->[0],$seqname,$startcol,$stopcol,$nearestseq);
+		foreach my $v (@$sv){
+		    if(abs($netfs) > $FS_THRESHOLD){
+			#Short circuit
+		    return undef;
 		}
-		if($freq_altstops){ 
-		    #check if stop is consistent with at least one other stop
-		    if($althash->{'stopfreq'}>1){
-			push @{$seq_attrs->{$seqname}},"alt_start=$althash->{'start'}-$althash->{'end'},orient:$althash->{'orient'},len:".($althash->{'end'}-$althash->{'start'}).",startfreq:$althash->{'startfreq'},stopfreq:$althash->{'stopfreq'}";#,startcol:$althash->{'startcol'},stopcol:$althash->{'stopcol'}";
+		    else{
+			if($v->[4] != 0){
+			    print "#FSVAR $seqname ",join(',',@$v),"\n" if($debug);
+			    push @$fsvars,$v;
+			    $netfs += $v->[4];
+			}
 		    }
-		}
-		else{
-		    push @{$seq_attrs->{$seqname}},"alt_start=$althash->{'start'}-$althash->{'end'},orient:$althash->{'orient'},len:".($althash->{'end'}-$althash->{'start'}).",startfreq:$althash->{'startfreq'},stopfreq:$althash->{'stopfreq'}";#,startcol:$althash->{'startcol'},stopcol:$althash->{'stopcol'}";
 		}
 	    }
 	}
+	return ($fsvars,$netfs);
     }
 }
-
 ##############################
 #Report annotations that can be reconciled with a frameshift
 #These may indicate a sequencing error or an authentic frameshift
@@ -1266,10 +2485,175 @@ sub checkStarts{
 #or cause a premature stop (PM that result in a stop, indels of len != mod 3)
 # 
 
+
 #Reports 
 #(1) frameshift location and indel
 #(2) resulting ORF,length, and translation
 #(3) any overlapping genes that would be subsumed by the new ORF
+
+#fs is signed locations of the frameshift relative to the sequence start
+#eg. +10 is a forward frameshift 10 bp downstream from translation start
+#    -9 is a backward frameshift 9 bp downstream from translation start
+
+sub checkFrameshifts_new{
+    my ($db,$codons,$seqs,$seq_attrs) = @_;
+    #Save list of all start codons $codon->$freq
+    my $starts = {};
+    my $stops = {};
+    die if(!exists $codons->{'starts'});
+    foreach my $seqname (keys %{$codons->{'starts'}}){
+	foreach my $codon (keys %{$codons->{'starts'}->{$seqname}}){
+	    $starts->{$codon} += $codons->{'starts'}->{$seqname}->{$codon};
+	}
+    }
+    die if(!exists $codons->{'stops'});
+    foreach my $seqname (keys %{$codons->{'stops'}}){
+	foreach my $codon (keys %{$codons->{'stops'}->{$seqname}}){
+	    $stops->{$codon} += $codons->{'stops'}->{$seqname}->{$codon};
+	}
+    }
+    
+    foreach my $seq (keys %$seqs){ 
+	#Consider all start codons and find corresponding stop
+	if(scalar(keys %{$seqs->{$seq}->{'features'}})>1){
+	    foreach my $pcodon (keys %{$codons->{'pairs'}}){
+		my($startcodon,$stopcodon) = split(/:/,$pcodon);
+		#If using this stop codon, look for a frameshift
+		if(exists $codons->{'stops'}->{$seq}->{$stopcodon}){
+		print "Looking for FS on $seq using $startcodon , $stopcodon\n";
+		my $fswin_min;
+		my $fswin_max;
+		my $start_s;
+		my $start_e;
+		my $stop_s;
+		my $stop_e;
+		#$codon is a tuple of alignment,aligned_column
+		my($startcol,$aln_s) = split(/$CODON_DELIM_REGEX/,$startcodon);
+		#find corresponding stop
+		my($stopcol,$aln_e) = split(/$CODON_DELIM_REGEX/,$stopcodon);
+		
+		my $si = &getAlignment($atree,$aln_s,$seq);
+		my $ei = &getAlignment($atree,$aln_e,$seq);
+		if($si){
+		    ($start_s,$start_e) = AlignmentTree::columntocoords($si,$startcol,$startcol+2);
+		    if($ei){
+			($stop_s,$stop_e) = AlignmentTree::columntocoords($ei,$stopcol,$stopcol+2);
+			$fswin_max=$stop_e;
+			$fswin_min=$stop_e-$FS_WINDOW;
+			my $origorflen = abs($stop_e-$start_s);
+			if($atree->contains($aln_e,$seq,$fswin_min,$fswin_max)){
+			    print "Contained within alignment\n";
+			    my $alni = &getAlignment($atree,$aln_e,$seq);
+			    my @res= AlignmentTree::coordstocolumn($atree->{_alignments}->{$aln_e}->[0],$seq,$fswin_min,$fswin_max);
+			    my $startcol = $res[0];
+			    my $stopcol = $res[1];
+			    my $indels = &reportVariants($atree,$db,$aln_e,$seq,$startcol,$stopcol);
+			    #print "#$codon freq:$codons->{'starts'}->{$seq}->{$codon} orient:$orient ORF:$orfstart-$orfend len:",$orfend-$orfstart," aalen:",length($origorf),"\n" if($debug);;
+			    foreach my $indel (@$indels){
+				my($fsstart,$indelbase,$origbase) = @$indel;
+				#die "$fsstart < $start-$end\n" if($fsstart < $start);
+				my $fsloc;
+				my $fstype;
+				if($indelbase eq '-'){
+				    #Reverse frameshift
+				    $fsloc = ($fsstart-$start_s) * -1; #
+				    $fstype = "F";
+				}
+				elsif($origbase eq '-'){
+				    #Forward frameshift
+				    $fsloc = ($fsstart-$start_s);
+				    $fstype = "R";
+				}
+				elsif($origbase ne '-' && $indelbase ne '-'){
+				    #point mutation
+				    #Not handled
+				}
+				else{
+				    die "Invalid combination $fsstart,$indelbase,$origbase";
+				}
+				$fsstart = ($fsstart < $start_s) ? $start_s : $fsstart;
+				#if($origbase ne 'X'){
+				#   my $base = substr($seqobj->seq(),$fsstart,1);
+				#    die if($base ne $origbase);
+				#}
+				print "#Edit @ $fsstart $origbase->$indelbase\n";# if($debug);;
+				print "#Attempting frameshift for ORF $start_s-$start_e @ loc $fsloc\n";
+				my $orient = $alni->[3]; #TODO check this
+				my $seqobj = $db->get_Seq_by_id($seq);
+				
+				
+				my ($neworf,$neworient) = &callORF($seqobj,$start_s,$start_e,$orient,[$fsloc]);
+				print "Length neworf:",length($neworf)*3," vs. orig annotation ",$origorflen,"\n";
+				#Only consider frameshifts which extend the ORF
+				if((length($neworf)*3) > $origorflen){
+				    print "#NEWORF ",length($neworf)*3," vs. $origorflen\n";
+				    my $fmin;
+				    my $fmax;
+				    
+				    #Get start coordinate and codon location
+				    
+				    #Get stop coordinate and codon location
+				    if($neworient eq '+'){
+					$fmin=$start_s;
+					$fmax=$start_s+(length($neworf)*3);
+					if($fstype eq 'F'){ #is forward frameshift
+					    #$fmax -= 1;
+					}
+					else{
+					    #$fmax += 1;
+					}
+				    }
+				    elsif($neworient eq '-'){
+					$fmin=$start_e-(length($neworf)*3);
+					$fmax=$start_e;
+					if($fstype eq 'R'){ #is forward frameshift
+					    #$fmin -= 1;
+					}
+					else{
+					    #$fmin += 1;
+					}
+				    }
+				    print "Finding codons for ORF $fmin-$fmax,$orient $fstype vs. orig $start_s,$start_e - $stop_s,$stop_e\n";
+				    my($new_s,$new_e) = &findCodons($atree,
+								    $seq,
+								    $fmin,
+								    $fmax,
+								    $neworient);
+				    my($mcol,$align_name) = (@$new_s);
+				    my $new_startcodon = $mcol.$CODON_DELIM.$align_name;
+				    ($mcol,$align_name) = (@$new_e);
+				    my $new_stopcodon = $mcol.$CODON_DELIM.$align_name;
+				    print "Codons: $new_startcodon $new_stopcodon on $seq\n";
+				    
+				    die "Orig: $pcodon New:$new_startcodon:$new_stopcodon" if($new_startcodon != $startcodon);
+				    
+				    #Add this ORF to list of alternatives for this genome
+				    if(! exists $codons->{'starts'}->{$seq}->{$startcodon}){
+					$codons->{'starts'}->{$seq}->{$startcodon}++;
+				    }
+				    if(! exists $codons->{'stop'}->{$seq}->{$new_stopcodon}){
+					$codons->{'stop'}->{$seq}->{$new_stopcodon}++;
+				    }
+				    if(! exists $codons->{'pairs'}->{$startcodon.':'.$new_stopcodon}->{'orgs'}->{$seq}){
+					$codons->{'pairs'}->{$startcodon.':'.$new_stopcodon}->{'orgs'}->{$seq} = [$fmin,$fmax,$neworient,0,$fsstart];
+				    }
+				    else{
+					print "#Codon pair $startcodon.':'.$new_stopcodon already exists on $seq ",join(',',@{$codons->{'pairs'}->{$startcodon.':'.$new_stopcodon}->{'orgs'}->{$seq}}),"\n";
+				    }
+				}
+			    }
+			}
+			else{
+			    print "Skipping frameshift check. $fswin_min - $fswin_max is not contained within alignment $aln_e\n" if($debug);
+			}
+		    }
+		}
+		}
+	    }
+	}
+    }
+}
+    
 sub checkFrameshifts{
     my ($db,$seqs,$genes,$codons,$seq_attrs) = @_;
 
@@ -1289,7 +2673,7 @@ sub checkFrameshifts{
 	foreach my $codon (keys %$starts){
 	    #check if $codon is aligned and upstream
 	    #$codon is a tuple of alignment,aligned_column
-	    my($startcol,$aln) = split(/\?/,$codon);
+	    my($startcol,$aln) = split(/$CODON_DELIM_REGEX/,$codon);
 	    my $gapped=1;
 	    #check is $col,$col+3 is gapped, return start coordinate on the genome
 	    my $i = &getAlignment($atree,$aln,$seq);
@@ -1327,9 +2711,9 @@ sub checkFrameshifts{
 				my @res= AlignmentTree::coordstocolumn($atree->{_alignments}->{$aln}->[0],$seq,$orfstart,$orfstart+3);
 				$stopcol = $res[0];
 			    }
-			    my @indels = &findIndels($atree,$seq,$startcol,$stopcol,$aln,$db);
+			    my $indels = &reportVariants($atree,$db,$aln,$seq,$startcol,$stopcol);
 			    print "#$codon freq:$codons->{'starts'}->{$seq}->{$codon} orient:$orient ORF:$orfstart-$orfend len:",$orfend-$orfstart," aalen:",length($origorf),"\n" if($debug);;
-			    foreach my $indel (@indels){
+			    foreach my $indel (@$indels){
 				my($fsstart,$indelbase,$origbase) = @$indel;
 				#die "$fsstart < $start-$end\n" if($fsstart < $start);
 				$fsstart = ($fsstart < $start) ? $start : $fsstart;
@@ -1420,15 +2804,15 @@ sub checkFrameshifts{
 					#new stop runs outside alignment
 					$stopcol = '?';
 				    }
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'orf'} = $neworf;
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'start'} = $neworfstart;
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'end'} = $neworfend;
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'orient'} = $neworforient;
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'fsstart'} = $fsstart;
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'orig'} = $origbase;
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'edit'} = $indelbase;
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'startcol'} = $startcol;
-				    $neworflist->{$seq}->{$neworfstart.'?'.$neworfend}->{'stopcol'} = $stopcol;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'orf'} = $neworf;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'start'} = $neworfstart;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'end'} = $neworfend;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'orient'} = $neworforient;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'fsstart'} = $fsstart;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'orig'} = $origbase;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'edit'} = $indelbase;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'startcol'} = $startcol;
+				    $neworflist->{$seq}->{$neworfstart.$CODON_DELIM.$neworfend}->{'stopcol'} = $stopcol;
 				}
 			    }
 			}
@@ -1476,7 +2860,7 @@ sub findnewORFs{
     #Foreach codon, attempt to find ORFs if none annotated above cutoffs
     print "#Total number of possible codons ",scalar(keys %$allcodons),"\n" if($debug);;
     foreach my $codon (keys %$allcodons){
-	my($col,$aln) = split(/\?/,$codon);
+	my($col,$aln) = split(/\$CODON_DELIM_REGEX/,$codon);
 	my $alignedseqs  = $atree->{_alignments}->{$aln}->[0]; #get seqs for $lan
 	foreach my $alnseq (@$alignedseqs){
 	    my $seq = $alnseq->[0];
@@ -1489,527 +2873,8 @@ sub findnewORFs{
     }
     my $seq_attrs = {};
     print "#Looking for new starts in new orfs\n" if($debug);;
-    &checkStarts($db,$codons,[keys %$noorfseqs],$seq_attrs);
+    &checkStarts($db,$codons,[keys %$noorfseqs],$seq_attrs,1);
     return $seq_attrs;
 }
 
-#
-#callORF()
-#Attempts to call an ORF using start codon specified by [start-end]
-#Start,end should be codon coordinates relative to the + strand. start<end
 
-#Will attempt to call an ORF on one strand.
-#Leading strand 5'->3' increasing coordinates [start-firstStop] 
-#Lagging strand 5'->3' decreasing coordinates [end-firstStop]
-
-#Will only call ORF if start,end,orient corresponds to an acutal start
-#codon, specified by the configurable codon table
-
-sub callORF{
-    my($seqobj,$start,$end,$orient) = @_;
-    die "Bad start codon $seqobj:$start-$end $orient" if($end < $start);
-    my $codon_table = Bio::Tools::CodonTable->new(-id=>11);
-    if($seqobj){
-	if($orient eq '+'){
-            my $seqlen = ($seqobj->length()>$MAXORFLEN) ? $start+$MAXORFLEN : $seqobj->length(); 
-	    my $newobj = $seqobj->trunc($start+1,$seqlen);
-	    #Check if valid start codon
-	    if($codon_table->is_start_codon($newobj->subseq(1,3))){
-		my $protein_seq_obj = $newobj->translate(-orf => 1,
-							 -codontable_id =>11);
-		return ($protein_seq_obj->seq(),$orient);
-	    }
-	    else{
-		print "#callORF trying '-' $seqobj,$start,$end,$orient Bad start codon ",$newobj->subseq(1,3) if($debug);;
-		my $seqlen = ($end>$MAXORFLEN) ? $end-$MAXORFLEN : 1;
-		my $newobj = $seqobj->trunc($seqlen,$end);
-		$newobj = $newobj->revcom();
-		#print " REV:",$codon_table->is_start_codon($newobj->subseq(1,3))," ",$newobj->subseq(1,3),"\n";
-		if($codon_table->is_start_codon($newobj->subseq(1,3))){
-		    my $protein_seq_obj = $newobj->translate(-orf => 1,
-							     -codontable_id =>11);
-		    
-		    return ($protein_seq_obj->seq(),$orient);
-		}
-		else{
-		    print "#WARNING: Skipping callORF $seqobj,$start,$end,$orient. '",$newobj->subseq(1,3),"' is not a valid start codon\n" if($debug);
-		}
-	    }		
-	}
-	else{
-	    die if($orient ne '-');
-            my $seqlen = ($end>$MAXORFLEN) ? $end-$MAXORFLEN : 1;
-	    my $newobj = $seqobj->trunc($seqlen,$end);
-	    $newobj = $newobj->revcom();
-	    #Check if valid start codon
-	    if($codon_table->is_start_codon($newobj->subseq(1,3))){
-		my $protein_seq_obj = $newobj->translate(-orf => 1,
-							 -codontable_id =>11);
-		
-		return ($protein_seq_obj->seq(),$orient);
-	    }
-	    else{
-		print "#callORF trying '+' $seqobj,$start,$end,$orient Bad start codon ",$newobj->subseq(1,3) if($debug);;
-		my $seqlen = ($seqobj->length()>$MAXORFLEN) ? $start+$MAXORFLEN : $seqobj->length(); 
-		my $newobj = $seqobj->trunc($start+1,$seqlen);
-		if($codon_table->is_start_codon($newobj->subseq(1,3))){
-		    my $protein_seq_obj = $newobj->translate(-orf => 1,
-							     -codontable_id =>11);
-		    
-		    return ($protein_seq_obj->seq(),$orient);
-		}
-		else{
-		    print "WARNING: Skipping callORF $seqobj,$start,$end,$orient. '",$newobj->subseq(1,3),"' is not a valid start codon\n";
-		}
-	    }
-	}
-	    
-    }
-    else{
-	print "#ERROR invalid seq obj $seqobj\n" if($debug);;
-    }
-    return undef;
-}
-#
-#Print members and attributes for a cluster
-#$query is the longest member of a cluster
-#Supported attributes
-sub reportCluster{
-    my($query,$mappedorgs,$mappedgenes,$unmappedgenes,$feat_attrs,$cluster_attrs,$seq_attrs,$new_orfs) = @_;
-    if(scalar(keys %$mappedgenes)>0){
-	if($COGoutputformat){
-	    if(scalar(keys %$mappedgenes)>0){
-		print "COG = $cluster_id, size ",scalar(keys %$mappedgenes), ", connections = 0, perfect = 0;\n";
-		print "\t$features->{$query}->[5]\n";
-		foreach my $organism (sort {$a cmp $b} keys %$mappedorgs){
-		    foreach my $gene (sort {$features->{$a}->[1] <=> $features->{$b}->[1]} (keys %{$mappedorgs->{$organism}->{'features'}})){
-			if($gene ne $query){
-			    print "\t$features->{$gene}->[5]\n";
-			}
-		    }
-		}
-	    }
-	}
-	else{
-	    my $classesstr = join(';',sort {$a cmp $b} keys %{$cluster_attrs});
-	    print ">CLUSTER_$cluster_id num_seqs=",scalar(keys %$mappedorgs)," num_genes=",scalar(keys %$mappedgenes)," num_alignments=",scalar(@{$mappedgenes->{$query}->{'alignments'}})," classes=$classesstr query=$query alignments=",join(',',@{$mappedgenes->{$query}->{'alignments'}}),"\n";
-
-	    my $qfmin = $features->{$query}->[1];
-	    my $qfmax = $features->{$query}->[2];
-	    my $qseqname = $features->{$query}->[0];
-	    my @mappedfeats;
-	    foreach my $organism (sort {$a cmp $b} keys %$mappedorgs){
-		my($start,$end) = &getspan($mappedgenes,keys %{$mappedorgs->{$organism}->{'features'}});
-		my @ogenes = sort {$features->{$a}->[1] <=> $features->{$b}->[1]} (keys %{$mappedorgs->{$organism}->{'features'}});
-		my @ocovs = map {sprintf("%.2f",$mappedgenes->{$_}->{'cov'}/$features->{$_}->[3])} (@ogenes); #%coverage over gene length
-		my @oids  = map {sprintf("%.2f",$mappedgenes->{$_}->{'pid'}/$mappedgenes->{$_}->{'len'})} (@ogenes); #%id over aligned length
-		my $classes;
-		my $longestorf=0;		
-		foreach my $gene (@ogenes){
-		    if(exists $feat_attrs->{$gene}){
-		      foreach my $c (sort {$a cmp $b} keys %{$feat_attrs->{$gene}}){
-		         $classes->{$c}++;
-		      }
-                    }
-		    $longestorf = ($features->{$gene}->[3] > $longestorf) ? $features->{$gene}->[3] : $longestorf;
-		}
-		##
-		#Report alternative start sites if they result in a longer ORF
-		my @attrs = sort {$a cmp $b} keys %$classes;
-		if(exists  $seq_attrs->{$organism}){
-		    my $orfidx=0;
-		    foreach my $alt (@{$seq_attrs->{$organism}}){
-			#Report alternative starts or possible frameshifts
-			if($alt =~ /alt_start/ || $alt =~ /alt_fs/){
-			    #Only report if results in a longer ORF
-			    my($astart,$aend) = ($alt =~ /alt_start=(\d+)-(\d+)/);
-			    my($len) = ($alt =~ /len:(\d+)/);
-			    #my($orient) = ($alt =~ /orient:(\w+)/);
-			    if(!$longer_altstarts || $len>$longestorf){
-				push @attrs,$alt;
-				push @mappedfeats,[[[$organism,$astart,$aend,'+',($aend-$astart).'M']],"ALTgene$organism$orfidx",'gene'];
-				$orfidx++;
-				if($organism eq $qseqname){
-				    $qfmin = ($astart < $qfmin) ? $astart : $qfmin;	
-				    $qfmax = ($aend > $qfmax) ? $aend : $qfmax;
-				}
-			    }
-			    else{
-				print "#Skipping $alt $len<$longestorf\n" if($debug);;
-			    }
-			}
-			else{
-			    print "#Unknown $alt" if($debug);;
-			}
-		    }
-		}
-
-		foreach my $gene (@ogenes){
-		    push @attrs,"feat_orient=$features->{$gene}->[4]";
-		    push @attrs,"aln_orient=$mappedgenes->{$gene}->{'relorient'}";
-		    if(defined $features->{$gene}->[11]){
-			push @attrs,"product=$features->{$gene}->[11]";
-		    }
-		}
-		print join(',',@ogenes),
-		"\tWGA$cluster_id",
-		"\t$organism",
-		"\tcov=",join(',',@ocovs),
-		"\tpid=",join(',',@oids),
-		"\tqcov=",sprintf("%.2f",$mappedorgs->{$organism}->{'qcov'}/($qfmax-$qfmin)),
-		"\t$start-$end",
-		"\t",$end-$start,
-		"\t",join(';',@attrs),
-		"\n";
-	    }
-	    ##
-	    #Report ORFs that are aligned but not annotated
-	    foreach my $organism (keys %$new_orfs){
-		my $orfidx=0;
-		foreach my $alt (@{$new_orfs->{$organism}}){
-		    die if(exists $mappedorgs->{$organism});
-		    my($astart,$aend) = ($alt =~ /alt_start=(\d+)-(\d+)/);
-		    my($len) = ($alt =~ /len:(\d+)/);
-		    die "Mismatching lengths $len != $aend - $astart" if($len != ($aend-$astart));
-		    #Check that this gene is longer than annotated genes on $organism
-		    my @unmappedlist;
-		    foreach my $feat_name (keys %$unmappedgenes){
-			if($feat2organism->{$feat_name} eq $organism){
-			    push @unmappedlist,[$feat_name,$features->{$feat_name}->[3]];
-			}
-		    }
-		    my @longestunmapped = sort {$b->[1] <=> $a->[1]} @unmappedlist;
-		    if($len > $longestunmapped[0]){
-			push @mappedfeats,[[[$organism,$astart,$aend,'+',($aend-$astart).'M']],"NEWORF$organism$orfidx",'gene'];
-			print "NEWORF$organism$orfidx",
-			"\tWGA$cluster_id",
-			"\t$organism",
-			"\tcov=",
-			"\tpid=",
-			"\t$astart-$aend",
-			"\t",$aend-$astart,
-			"\t",join(';',@{$new_orfs->{$organism}}),
-			"\n";
-			$orfidx++;
-		    }
-		}
-	     }
-	    if($printalignments){
-		print "#Printing query $query $qseqname,$qfmin,$qfmax\n" if($debug);;
-		my @isect = $atree->map($qseqname,$qfmin,$qfmax,"alignment");
-		#Print all features overlapping the alignment window.
-		#This may include addl features than those in the cluster
-		my $printedfeats = {};
-		foreach my $feat (@isect){
-		    my $feat_name = $feat->[0];
-		    $feat_name =~ s/gene\://;
-		    die "Can't find feature $feat_name" if(!exists $features->{$feat_name});
-		    $printedfeats->{$feat_name}++;
-		}
-		foreach my $feat_name (keys %$printedfeats){
-		    my $fmin = $features->{$feat_name}->[1];
-		    my $fmax = $features->{$feat_name}->[2];
-		    my $seqname = $features->{$feat_name}->[0];
-		    my $orient = $features->{$feat_name}->[4];
-		    if(exists $mappedgenes->{$feat_name}){
-			push @mappedfeats,[[[$seqname,$fmin,$fmax,$orient,($fmax-$fmin).'M']],'gene:'.$feat_name,'gene'];
-		    }
-		    else{
-			print "#WARNING Expected gene $feat_name in unmapped list: ".join(',',keys %$unmappedgenes)."\n" if(!exists $unmappedgenes->{$feat_name});
-			my $cov = sprintf("c%.1f,i%.1f ",$unmappedgenes->{$feat_name}->{'cov'}/$features->{$feat_name}->[3],
-					  $unmappedgenes->{$feat_name}->{'pid'}/$features->{$feat_name}->[3]);
-			push @mappedfeats,[[[$seqname,$fmin,$fmax,$orient,($fmax-$fmin).'M']]," $cov *gene:".$feat_name,'gene'];
-		    }
-		}
-		foreach my $align_name (@{$mappedgenes->{$query}->{'alignments'}}){
-		    #Check that new range is still within $alignment
-		    print "#Checking the $qseqname,$qfmin,$qfmax,$align_name is within range\n" if($debug);;
-		    my @isect = $atree->intersect($qseqname,$qfmin,$qfmax,$align_name);
-		    my $printfmin;
-		    my $printfmax;
-		    foreach my $aln (@isect){
-			if($aln->[1] eq $qseqname && $aln->[0] eq $align_name){
-			    #print join(',',@$aln),"\n";
-			    $printfmin = $aln->[2];
-			    $printfmax = $aln->[3];
-			    print "#Resetting print range to $printfmin-$printfmax from $qfmin-$qfmax\n" if($debug);
-			}
-		    }
-		    if(defined $printfmin && defined $printfmax){
-			print "ALIGNMENT:$align_name\n";
-			my($colstart,$colend) = AlignmentTree::coordstocolumn($atree->{_alignments}->{$align_name}->[0],$qseqname,$printfmin,$printfmax);
-			$atree->printAlignment($align_name,$colstart,$colend,$db,\@mappedfeats);
-		    }
-		    else{
-			die;
-		    }
-		}
-	    }
-	    print "\n";
-	}
-    }
-    else{
-	#No genes in cluster
-	die;
-    }
-}
-
-sub findSingletons{
-    my($atree,$mapped,$unmapped,$subsumed) = @_;
-    my $singletons = {};
-    foreach my $feat_name (keys %$features){
-	my $fmin = $features->{$feat_name}->[1];
-	my $fmax = $features->{$feat_name}->[2];
-	if(! exists $mapped->{$feat_name}){
-	    die if(exists $mapped->{$feat_name});
-	    my $classes = &annotateSingletons($atree,$features->{$feat_name}->[0],$feat_name,$fmin,$fmax);
-	    if(exists $unmapped->{$feat_name}){
-		my $query=$feat_name;
-		my($mappedorgs,$mappedgenes,$unmappedorgs,$unmappedgenes) = &buildCluster($atree,$query);
-		my($feat_attrs,$cluster_attrs,$codons) = &annotateCluster($atree,$mappedgenes,$mappedorgs);
-		my $new_orfs = &findnewORFs($db,$atree,$mappedorgs,$mappedgenes,$codons);
-		if(scalar(keys %$new_orfs)){
-		    my $seq_attrs = {};	 
-		    &reportCluster($query,$mappedorgs,$mappedgenes,$unmappedgenes,$feat_attrs,$cluster_attrs,$seq_attrs,$new_orfs);
-		    $cluster_id++;
-		}
-		my $featlen = $fmax-$fmin;
-		my $mappedlen = $unmapped->{$feat_name}->{'len'};
-		if($featlen <= 0){
-		    print STDERR "#Bad featlen for feature $feat_name $fmax-$fmin\n";
-		    $featlen=1;
-		}
-		if($mappedlen <= 0){
-		    print STDERR "#Bad coverage for feature $feat_name Coverage:$unmapped->{$feat_name}->{'len'}\n";
-		    $mappedlen=1;
-		}
-		my ($seqname,$fmin,$fmax,$len,$orient) = @{$features->{$feat_name}};
-		if($COGoutputformat){}
-		else{
-		    print "#SINGLETON $feat_name\tbest_cluster:$unmapped->{$feat_name}->{'WGA_cluster'}\tcov:";
-		    #printf("%.2f",$unmapped->{$feat_name}->{'cov'}/$featlen);
-		    printf("%.2f",$unmapped->{$feat_name}->{'cov'});
-		    print " pid:";
-		    #printf("%.2f",$unmapped->{$_}->{'pid'}/$mappedlen);
-		    printf("%.2f",$unmapped->{$feat_name}->{'pid'});
-		    printf(" lenbp:%f ",$mappedlen);
-		    join(' ',@$classes);
-		    if(defined $features->{$feat_name}->[11]){
-			print " product=$features->{$feat_name}->[11]";
-		    }
-		    print "\n";
-		}
-	    }
-	    else{
-		if(exists $subsumed->{$feat_name}){
-		    print "#DELETED $feat_name\n";
-		}
-		else{
-		    if($COGoutputformat){}
-		    else{
-			print "#SINGLETON $feat_name ",join(' ',@$classes);
-			if(defined $features->{$feat_name}->[11]){
-			    print " product=$features->{$feat_name}->[11]";
-			}
-			print "\n";
-		    }
-		    $nohit++;
-		    $singletons->{$feat_name}++;
-		}
-	    }
-	}
-	else{
-	    #Mapped ORF, not a singleton
-	}
-    }
-
-    return $singletons;
-}
-
-
-###############################
-#General utility funcs
-sub getspan{
-    my($features) = shift;
-    my @coords;
-    foreach my $gene (@_){
-	push @coords,$features->{$gene}->{'fmin'},$features->{$gene}->{'fmax'};
-    }
-    my @sortedcoords = sort {$a <=> $b} @coords;
-    return ($sortedcoords[0],$sortedcoords[$#coords]);
-}
-
-
-#Returns aligned location of start and stop codons
-#If annotation is not a valid start or stop codons returns -1
-#If codon is not aligned returns undef
-sub findCodons{
-    my($atree,$seqname,$fmin,$fmax,$orient,$fname) = @_;
-    #my($name,$seq,$start,$end,$coverage,$qpid) = @$aln;
-    my $codon_table = Bio::Tools::CodonTable->new(-id=>11);
-    my $seqobj = $db->get_Seq_by_id($seqname);
-    if(!$seqobj){
-	print "Can't find $seqname\n";
-	return;
-    }
-    my $startcodon=undef;
-    my $stopcodon=undef;
-    my $aln_orient=undef;
-    if($orient eq '+'){
-	if(!$codon_table->is_start_codon($seqobj->subseq($fmin+1,$fmin+2+1))){ #bioperl is 1-base coordinates
-	    print "#Bad start codon $fname,$seqname,$fmin,$fmax,$orient codon $fmin+1,$fmin+2+1 ",$seqobj->subseq($fmin+1,$fmin+2+1)," aln_orient:$aln_orient\n" if($debug);
-	    return -1;
-	} 
-	else{
-	    #Find start codon + strand
-	    $startcodon = &getAlignedCols($atree,$seqname,$fmin,$fmin+3);
-	}
-	
-	if(!$codon_table->is_ter_codon($seqobj->subseq($fmax-3+1,$fmax))){
-	    print "#Bad stop $fname,$seqname,$fmin,$fmax,$orient codon $fmax-3+1,$fmax ",$seqobj->subseq($fmax-3+1,$fmax)," aln_orient:$aln_orient\n" if($debug);
-	    return -1;
-	}
-	else{
-	    #Find stop codon - strand
-	    $stopcodon = &getAlignedCols($atree,$seqname,$fmax-3,$fmax);
-	}
-    }
-    else{
-	die "Bad orient $orient" if($orient ne '-');
-	if(!$codon_table->is_start_codon(revcom($seqobj->subseq($fmax-3+1,$fmax))->seq())){
-	    print "#Bad start codon $fname,$seqname,$fmin,$fmax,$orient codon $fmax-3+1,$fmax ",revcom($seqobj->subseq($fmax-3+1,$fmax))->seq()," aln_orient:$aln_orient\n" if($debug);
-	    return -1;
-	} 
-	else{
-	    #Find start codon on - strand
-	    $startcodon = &getAlignedCols($atree,$seqname,$fmax-3,$fmax);
-	}
-	if(!$codon_table->is_ter_codon(revcom($seqobj->subseq($fmin+1,$fmin+3))->seq())){
-	    print "#Bad stop codon $fname,$seqname,$fmin,$fmax,$orient codon $fmin+1,$fmin+3 ",revcom($seqobj->subseq($fmin+1,$fmin+3))->seq()," aln_orient:$aln_orient\n" if($debug);
-	    return -1;
-	} 
-	else{
-	    #Find stop codon on - strand
-	    $stopcodon = &getAlignedCols($atree,$seqname,$fmin,$fmin+3);
-	}
-    }
-    return ($startcodon,$stopcodon);
-}
-
-
-sub getAlignment{
-    my($atree,$align_name,$seqname) = @_;
-    my $alignment = $atree->{_alignments}->{$align_name}->[0];
-    foreach my $i (@$alignment){
-	if($i->[0] eq $seqname){
-	    return $i;
-	}
-    }
-    print "#Can't find $seqname on alignment $align_name\n" if($verbose);
-    return undef;
-}
-
-#Look for indels in alignment columns [$codon-$offset,$codon+2]
-sub findIndels{
-    my($atree,$seq,$startcol,$endcol,$aln,$db) = @_;
-    die if($endcol<$startcol);
-    print "#Analyzing codon position $startcol in alignment $aln seq $seq \n" if($debug);
-
-    print "#Retrieving alignment matrix for $startcol-$endcol for alignment $aln \n" if($debug);
-    my ($mmatrix,$seqmatrix,$names) = $atree->getAlignmentMatrix($aln,$startcol,$endcol,$db);
-    print "#Expecting width ",($endcol-$startcol+1)," row count ",scalar(@$mmatrix)," ",scalar(@$names),"\n" if($debug);
-    
-    my $results = {};
-    my @edits;
-
-    my $qryidx;
-    my $qrychar;
-    my $width;
-    for(my $i=0;$i<@$mmatrix;$i++){
-	if($names->[$i] eq $seq){
-	    $qryidx = $i;
-	}
-    }
-    #Matrix cols start at 0
-    for(my $j=0;$j<($endcol-$startcol+1);$j++){
-	for(my $i=0;$i<@$mmatrix;$i++){
-	    if(substr($mmatrix->[$i],$j,1) ne '.' &&
-	       substr($mmatrix->[$i],$j,3) =~ /\./ ){ #gap < length 3
-		#column $i has multiple characters
-		print "#MUT $i $j ",substr($mmatrix->[$i],$j,1)," $names->[$i] $seq\n" if($debug);
-		$results->{$j}++;
-	    }
-
-	}
-    }
-    foreach my $r (keys %$results){
-	my $reloffset = $startcol+$r;
-	my $freqchar = {};
-	for(my $i=0;$i<@$mmatrix;$i++){
-	    my $char;
-	    if(substr($mmatrix->[$i],$r,1) eq '-'){
-		#gap
-		$char = substr($mmatrix->[$i],$r,1);
-		#die "Unexpected char $i $r $seqmatrix->[$i]->[$r] $mmatrix->[$i]->[$r]" if(defined $seqmatrix->[$i]->[$r]);
-	    }
-	    else{
-		#retrieve base
-		#TODO this is slow, improve perf
-		$char = substr($seqmatrix->[$i],$r,1);
-	    }
-	    if($i == $qryidx){
-		$qrychar = $char;
-	    }
-	    die "Bad char '$char'" if(length($char)!=1);
-	    $freqchar->{$char}++;
-	}
-	#report most frequent character
-	my @sortedchars = sort {$b <=> $a} (keys %$freqchar);
-        #retrieve coordinate on $seq for reloffset
-	my $alni = &getAlignment($atree,$aln,$seq);
-	my($fsstart,$fsend) = AlignmentTree::columntocoords($alni,$reloffset,$reloffset);
-	foreach my $base (@sortedchars){
-	    if($base ne $qrychar 
-	       #&& $freqchar->{$base}>=$freqchar->{$qrychar}	    #only consider bases that occur more frequently than 
-	       #&& $freqchar->{$base}>=scalar(@$mmatrix)/2){  	    #optionally also in majority of sequences
-	       ){
-		print "#ALT col:$reloffset coord:$fsstart-$fsend base:$base freq:$freqchar->{$base} $seq:$qrychar $freqchar->{$qrychar}\n" if($debug);
-		push @edits,[$fsstart,$base,$qrychar,$reloffset];
-	    }
-	    else{
-		#last;#can shortcircuit, only consider more frequent bases
-	    }
-	}
-    }
-    return @edits;
-}
-
-#Returns the overlapping alignment and start-end column for a sequence range
-#Inputs
-#getAlignedCols(seq,fmin,fmax)
-#Returns [start_colnum,alignment_obj,end_colnum,matching_bits]
-sub getAlignedCols{
-    my($atree,$seqname,$fmin,$fmax) = @_;
-    my $ret;
-    my @alignments = $atree->intersect($seqname,$fmin,$fmax,$aligntoken);
-    my $found=0;
-    foreach my $aln (@alignments){
-	if($seqname eq $aln->[1]){
-	    my $align_name = $aln->[0];
-	    my $align_start = $aln->[2];
-	    my $align_end = $aln->[3];
-	    die "Bad alignment name $align_name" if(!exists $atree->{_alignments}->{$align_name});
-	    die "Mis-mathed orient $aln->[6] ne $aln->[7]" if($aln->[7] ne $aln->[6]);
-	    my $alni = $atree->{_alignments}->{$align_name}->[0];
-	    if($align_start == $fmin && $fmax == $align_end){
-		if($found){
-		    print "#WARNING Overlapping aligned region found for $seqname,$fmin,$fmax. $align_name and $ret->[1]\n" if($verbose);
-		}
-		my @res= AlignmentTree::coordstocolumn($alni,$seqname,$fmin,$fmax);
-		$ret = [$res[0],$align_name,$res[1],$res[2]];
-		$found=1;
-	    }
-	}
-    }
-    return $ret;
-}
