@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 if(! -d $ENV{'MUGSY_INSTALL'}){
-    my $default_install = "/usr/local/projects/angiuoli/developer/sangiuoli/mugsy/trunk/";
+    my $default_install = "/usr/local/projects/angiuoli/mugsy_trunk/";
     if( -d $default_install){
 	$ENV{'MUGSY_INSTALL'} = $default_install;
 	print STDERR "MUGSY_INSTALL environment variable not set. Using $default_install\n";
@@ -172,25 +172,7 @@ my $results = GetOptions (\%options,
 
 pod2usage(-verbose=>3) if($options{'help'});
 
-####################################################
-## We need to append the filenames present in the tag
-## so modifying the code so that it would take input
-## fasta files either from the command line or from
-## the tagged dataset.
-## Modified by: Mahesh Vangala
-#####################################################
-my @inputseqfiles = ();
-unless($options{'fasta_file_list'}) {
-        @inputseqfiles = @ARGV;
-} else {
-        getFastaFilesPath($options{'fasta_file_list'}, \@inputseqfiles);
-}
-
 $options{'debug'} = 0 if(!defined $options{'debug'});
-print LOG "Processing FASTA files ",join(',',@inputseqfiles),"\n" if($options{'debug'});
-
-pod2usage(-verbose=>3, -message => "Need to specify valid input fasta file") if(! scalar(@inputseqfiles));
-
 
 ###EXTERNAL PROGS####
 my $mugsyinstall = $ENV{'MUGSY_INSTALL'};
@@ -273,6 +255,33 @@ elsif($options{'log'}){
 }else{
     open $logfh,"+>$options{'prefix'}.mugsy.log";
 }
+
+####################################################                                                                                             
+## We need to append the filenames present in the tag                                                                                                
+## so modifying the code so that it would take input                                                                                                           
+## fasta files either from the command line or from                                                                                                             
+## the tagged dataset.                                                                                                                                          
+## Modified by: Mahesh Vangala                                                                                                                                  
+#####################################################                                                                                                           
+my @inputseqfiles = ();
+unless($options{'fasta_file_list'}) {
+    @inputseqfiles = @ARGV;
+} else {
+    getFastaFilesPath($options{'fasta_file_list'}, \@inputseqfiles);
+}
+#Attempt to detect and convert genbank files                                                                                                                    
+for(my $i=0;$i<@inputseqfiles;$i++){
+    if(`head -1 $inputseqfiles[$i]` =~ /^LOCUS\s+/){
+        print STDERR "Attempting to convert $inputseqfiles[$i] to FASTA\n";
+        my $bname = basename($inputseqfiles[$i]);
+        print `bp_seqconvert.pl --from genbank --to fasta < $inputseqfiles[$i] > $options{'directory'}/$bname.fsa`;
+        $inputseqfiles[$i]="$options{'directory'}/$bname.fsa";
+    }
+}
+print LOG "Processing FASTA files ",join(',',@inputseqfiles),"\n" if($options{'debug'});
+
+pod2usage(-verbose=>3, -message => "Need to specify valid input fasta file") if(! scalar(@inputseqfiles));
+
 #Skipsearch automatically sets keepsearchfiles so
 #that search output is preserved
 if($options{'skipsearch'}){
