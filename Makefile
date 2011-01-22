@@ -32,6 +32,7 @@ mugsy_install:
 	install fixMAFnames.pl ${INSTALL_DIR}
 	install splitmaf.pl ${INSTALL_DIR}
 	install plot.pl ${INSTALL_DIR}
+	install delta-dups.sh ${INSTALL_DIR}
 
 	install -m 644 README ${INSTALL_DIR}
 	install -m 644 CHANGELOG ${INSTALL_DIR}
