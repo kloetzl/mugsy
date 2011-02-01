@@ -1,24 +1,28 @@
+
 To build, run make all
 
-synchain-mugsy
+chaining/
 ----------------
-LCB identification code that require the Boost library
+Original Mugsy sources for LCB identification code 
+Requires the Boost library
 
-MUMmer3.20
-----------
+Mugsy includes some 3rd party sources to build
+
+MUMmer3.20/
+---------------
 A copy of the original sources from http://mummer.sourceforge.net. 
 
 Modifications include delta-filter -b for reporting duplications and
 new utility delta2maf
 
-mugsy-seqan
+mugsy-seqan/
 ----------------
 A copy of the original sources from the Seqan library and
 build environment that is required to build mugsyWGA
 
 The orginal sources were obtained from here http://www.seqan.de/
 
-The new sources for mugsyWGA are in projects/library/apps/mugsy
+New sources for mugsyWGA are in projects/library/apps/mugsy
 
 Additional changes to support reversals include these sources 
 graph_align_tcoffee_msa.h
@@ -29,5 +33,8 @@ graph_impl_align.h
 graph_impl_interval_tree.h
 graph_impl_fragment.h
 
-
+mugsy-seqan/projects/library/apps/mugsy/libmaf.a
+----------------
+A library of maf conversion utilities was built from Multiz 
+downloaded from here http://www.bx.psu.edu/miller_lab/
 
