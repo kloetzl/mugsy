@@ -26,8 +26,8 @@ Compiler ?= g++
 ifdef MUGSYCODEDIR
  CCFlags += -I $(MUGSYCODEDIR) -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -pedantic -ftemplate-depth-200 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
 else
- CCFlags += -I /usr/local/projects/angiuoli/developer/sangiuoli/ -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -pedantic -ftemplate-depth-200 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
- MUGSYCODEDIR=/usr/local/projects/angiuoli/developer/sangiuoli/
+ CCFlags += -I /usr/local/projects/angiuoli/mugsy_trunk -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -pedantic -ftemplate-depth-200 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
+ MUGSYCODEDIR=/usr/local/projects/angiuoli/mugsy_trunk
 endif
 
 CCFlags += -I $(MUGSYCODEDIR) -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -pedantic -ftemplate-depth-200 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
@@ -94,9 +94,9 @@ endef
 # Link $(1) to output file $(2)
 define cmdLink
 	@echo $(Indent)link $(2)
-	@echo "  " $(Compiler) $(LDFlags) -L $(MUGSYCODEDIR)/maflib -lmaf -o "$(2)"
+	@echo "  " $(Compiler) $(LDFlags) -L projects/library/apps/mugsy/ -L $(MUGSYCODEDIR)/maflib -lmaf -o "$(2)"
 	#MODIFIED BY SVA
-        @$(Compiler) $(1) $(LDFlags) -L $(MUGSYCODEDIR)/maflib -lmaf -o "$(2)"
+        @$(Compiler) $(1) $(LDFlags) -L projects/library/apps/mugsy/ -L $(MUGSYCODEDIR)/maflib -lmaf -o "$(2)"
 endef
 
 

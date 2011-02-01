@@ -73,7 +73,7 @@ SEQAN_PROTIMESTART(__myProfileTime); // Profiling
 #endif
 
 //Example transform in multiz-tba/trunk/transformcoords.cpp
-#include "maflib/transformcoords.h"
+#include "transformcoords.h"
 
 using namespace seqan;
 using namespace std;
@@ -3859,6 +3859,7 @@ std::vector<s_score> alignLCBs(TGraph &g,
   //For tracking if an anchor has been aligned in an LCB
   std::set<TVertexDescriptor> coveredSet;
 
+  // TODO, for parallel mugsy, refactor into a sub-process and parallel loop
   for(typename std::vector<std::vector<TVertexDescriptor> >::iterator lit = LCBs.begin();lit!=LCBs.end();lit++){
 #ifdef DEBUGGING
     std::cout << "LCB:" << lcbid << " num_anchors:" << lit->size() << std::endl;	  
