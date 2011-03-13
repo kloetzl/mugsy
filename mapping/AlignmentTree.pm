@@ -43,10 +43,13 @@ use Bio::Tools::CodonTable;
 $Storable::Deparse = 1;
 $Storable::Eval = 1;
 my $DEBUG=0;
+my $QCCHECKS=0;
 my $BITV_SIZE=10000000; #10MB largest single aligned region
 
-#my $aligntoken="WGA";
 my $aligntoken="WGA";
+
+#Disallow more than one genetic segment per alignment
+my $nodups=0;
 
 sub new{
     my $classname = shift;
@@ -238,6 +241,9 @@ sub intersect{
 		}
 		die if($qmstart<$qstart);
 		die if($qmend>$qend);
+		if($qmstart==$qmend){
+		    next;
+		}
 		die "Invalid matching interval coords:$qmend-$qmstart from query $qstart-$qend\n" if($qmend<=$qmstart);
 		my $queryspancheck=0;
 		if($qstart == $qmstart && $qend == $qmend){
@@ -267,18 +273,20 @@ sub intersect{
 		    #(4) Crop aligned feature. Convert back from alignment column to genomic coords on $mseq
 		    #$currbv stores a bitmatrix from $qcolumnstart-$qcolumnend indicating if sequence $mseq is aligned in the interval
 		    my($s,$e,$currbv) = &columntocoords($alni,$qcolumnstart,$qcolumnend,$querybv);
-		    if($mseq eq $qseqname){
-			die if($s != $qmstart);
-			die if($e != $qmend);
-			die if($morient ne $queryorient);
-		    }
+		    #if($mseq eq $qseqname && $nodups){
+			#die if($s != $qmstart);
+			#die if($e != $qmend);
+			#die if($morient ne $queryorient);
+		    #}
 		    
 		    #Check the actual number of aligned columns
 		    my $pid=0;
-		    if($mseq eq $qseqname){
-			my ($qs1,$qe1) = &coordstocolumn($alignobj,$qseqname,$s,$e);
-			print "Checking for matching characters between col:$qcolumnstart-$qcolumnend $qs1-$qe1 coords:$s-$e\n" if($self->{_debug});
-		    }
+
+		    
+		    #if($mseq eq $qseqname && $nodups){
+			#my ($qs1,$qe1) = &coordstocolumn($alignobj,$qseqname,$s,$e);
+			#print "Checking for matching characters between col:$qcolumnstart-$qcolumnend $qs1-$qe1 coords:$s-$e\n" if($self->{_debug});
+		     #}
 
 		    my $intersectbv = new Bit::Vector($querybv->Size());
 		    $intersectbv->Intersection($querybv,$currbv); 
@@ -361,7 +369,7 @@ sub map{
 	foreach my $isectn (@isects){
 	    my($align_name,$seq,$start,$end,$coverage,$pid,$qorient,$orient) = @$isectn;
 	    print "Looking for $qseqname in $align_name,$seq,$start,$end,$coverage,$pid\n" if($self->{_debug}); 
-	    if($seq eq $qseqname){
+	    if($seq eq $qseqname && $end<=$qend && $start>=$qstart){
 		die "Mismatched orient $qmorient != $orient" if($qorient ne $orient);
 		die "$end>$qend" if($end>$qend);
 		die "$start<$qstart" if($start<$qstart);
@@ -402,7 +410,7 @@ sub map{
 	    my($align_name,$seq,$start,$end,$coverage,$pid,$qaln_orient,$aln_orient) = @$isectn;
 	    my($alignobj,$alignment_bv,$align_width) = $self->getAlignment($align_name);
 	    my($qfstart,$qfend,$qforient) = &matchinginterval($alignobj,$qseqname,$qmstart,$qmend);
-	    my ($qfscolumnstart,$qfscolumnend,$fsquerybv) = &coordstocolumn($alignobj,$qseqname,$qfstart,$qfend,$qforient);
+	    my ($qfscolumnstart,$qfscolumnend,$fsquerybv) = &coordstocolumn($alignobj,$qseqname,$qfstart,$qfend);
 	    #print "#Mapping with alignment $align_name $seq $start-$end cov:$coverage,pid:$pid,qaln_orient:$qaln_orient,aln_orient:$aln_orient\n";
 	    #Query coverage should correspond to interval start-end
 	    die if($coverage != ($end-$start));
@@ -428,14 +436,14 @@ sub map{
 		die "Bad number of matching columns $ipid>($fend-$fstart) $fscolumnstart-$fscolumnend" if($ipid>($fend-$fstart));
 		die if($forient1 ne $forient2);
 		die if($seq ne $fseq);
-		if($fseq eq $qseqname){
+		if($fseq eq $qseqname && $nodups){
 		    die "$fstart<$qmstart query:$seq,$start,$end $fname,$fseq,$fstart,$fend,$fcoverage,$fpid" if($fstart<$qmstart);
 		    die "$fend>$qmend query:$seq,$start,$end $fname,$fseq,$fstart,$fend,$fcoverage,$fpid" if($fend>$qmend);
 		}
 		print "Adding result $fname,$fseq,$fstart,$fend,$fcoverage,$align_name,$seq,$qcoverage,$fpid\n" if($self->{_debug});
 		#push @results,[$fname,$fseq,$fstart,$fend,$coverage,$align_name,$seq,$fcoverage,$ipid,$isectn,$qaln_orient,$aln_orient,$forient1];
 		#Determine span on query
-		my ($qfsstart,$qfsend) = &columntocoords($self->getAlignedInterval($align_name,$qseqname),$fscolumnstart,$fscolumnend);
+		my ($qfsstart,$qfsend) = &columntocoords($self->getAlignedInterval($align_name,$qseqname,$qfstart,$qfend),$fscolumnstart,$fscolumnend);
 		push @results,[$fname,$fseq,$fstart,$fend,$qfsend-$qfsstart,$align_name,$seq,$fcoverage,$ipid,$isectn,$qaln_orient,$aln_orient,$forient1];
 	    }
 	    print "Finished mapping alignment $align_name\n" if($self->{_debug});
@@ -452,18 +460,23 @@ sub map{
     return @results;
 }
 
+#TODO, optimize this retrieval
 sub matchinginterval{
     my($alignobj,$qseqname,$qstart,$qend) = @_;
     my $start=undef;
     my $end=undef;
     my $orient=undef;
+    print "QUERYING $alignobj for $qseqname $qstart-$qend\n" if($DEBUG);
     foreach my $alni (@$alignobj){
 	if($alni->[0] eq $qseqname){
 	    print "HIT on $alni->[0] query=$qseqname:$qstart-$qend ; interval=$qseqname:$alni->[1]-$alni->[2] $alni->[3]\n" if($DEBUG);
 	    if(($qstart < $alni->[1] && $qend < $alni->[1]) || ($qstart > $alni->[2] && $qend > $alni->[2])){
-		print "WARNING: Invalid matching interval. Alignment interval $alni->[0]:$alni->[1]-$alni->[2] not contained in interval $qseqname:$qstart-$qend\n";
-		&printAlignmentDebug($alignobj);
-		return ($start,$end,$orient);
+		if($nodups){
+		    print "WARNING: Invalid matching interval. Alignment interval $alni->[0]:$alni->[1]-$alni->[2] not contained in interval $qseqname:$qstart-$qend\n";
+		    &printAlignmentDebug($alignobj);
+		    #return ($start,$end,$orient);
+		}
+		next;
 	    }
 
 	    $start = $qstart < $alni->[1] ? $alni->[1] : $qstart;
@@ -472,11 +485,11 @@ sub matchinginterval{
 		print "WARNING multiple matching alignments to $qseqname,$qstart,$qend with inconsistent orientations. $orient ne $alni->[3]\n";
 		&printAlignmentDebug($alignobj);
 		die "Multiple copies of a sequence per alignment not supported";
-		#Keep existing orient
 	    }
 	    else{
 		$orient = $alni->[3];
 	    }
+	    last;
 	}
 	else{
 	    print "Checked $alni->[0] in obj size ",scalar(@$alignobj),"\n" if($DEBUG);
@@ -499,7 +512,7 @@ sub matchinginterval{
 #Column coordinates are 1 start, numbering bases/columns in an alignment matrix
 #Genomic coordinates are 0 start, interbase
 sub coordstocolumn{
-    my($alignobj,$qseqname,$coord1,$coord2) = @_;
+    my($alignobj,$qseqname,$coord1,$coord2,$skipbv) = @_;
     die "Expecting 0 start, interbase coordinates $coord1<=$coord2" if($coord1>=$coord2);
     #Column position in the alignment
     #Starting from position 1
@@ -507,17 +520,26 @@ sub coordstocolumn{
     my $columnend;
     #Bit vector keeps track of aligned columns
     #Starting at column 1, column index 0 is ignored
-    my $querybv = new Bit::Vector($BITV_SIZE); #setting max aligned interval at 10MB
+    my $querybv;
+    if(! $skipbv){
+	$querybv = new Bit::Vector($BITV_SIZE); #setting max aligned interval at 10MB
+    }
+    my $alnwidth;
     foreach my $alni (@$alignobj){
 	if($alni->[0] eq $qseqname){
-
 	    if($coord1<$alni->[1] || $coord1>$alni->[2]){
-		&printAlignmentDebug($alignobj);
-		die "Start position $coord1 is not contained in interval $qseqname:$alni->[1]-$alni->[2]";
+		if($nodups){
+		    &printAlignmentDebug($alignobj);
+		    die "Start position $coord1 is not contained in interval $qseqname:$alni->[1]-$alni->[2]";
+		}
+		next;
 	    }
 	    if($coord2<$alni->[1] || $coord2>$alni->[2]){
-		&printAlignmentDebug($alignobj);
-		die "End position $coord2 is not contained in interval $qseqname:$alni->[1]-$alni->[2]";
+		if($nodups){
+		    &printAlignmentDebug($alignobj);
+		    die "End position $coord2 is not contained in interval $qseqname:$alni->[1]-$alni->[2]";
+		}
+		next;
 	    }
 
 	    my $offsetstart;
@@ -571,11 +593,12 @@ sub coordstocolumn{
 		$alni->[2]-$alni->[1]," orient:$orient\n" if($DEBUG);
 
 		my ($cigs,$columncount) = &get_cigs($alni->[4]);
+		$alnwidth=$columncount;
 		die "$offsetend>$columncount. Check cigar string $alni->[4], appears to be incorrect length for $coord1-$coord2" if($offsetend>$columncount);
 		my $currcount2=0;
 		foreach my $c2 (@$cigs){
 		    my($count2,$char2) = @$c2;
-		    if($char2 eq 'M'){
+		    if(!$skipbv && $char2 eq 'M'){
 			#|*      |$currcount2
 			#| *     |$currcount2+1
 			#|     * |$currcount2+$count2
@@ -637,12 +660,20 @@ sub coordstocolumn{
 		#Assume interval aligns at its entire length
 		$columnstart=$offsetstart;
 		$columnend=$offsetend;
-		$querybv->Interval_Fill($columnstart,$columnend);
+		if(!$skipbv){
+		    $querybv->Interval_Fill($columnstart,$columnend);
+		}
 	    }
 	    last;
 	}
     }
-    die "Can't map $columnstart-$columnend" if(!defined $columnstart || !defined $columnend);
+    if(!defined $columnstart){
+	#$columnstart=1;
+    }
+    if(!defined $columnend){
+	#$columnend=$alnwidth;
+    }
+    die "Can't map $alignobj,$qseqname,$coord1,$coord2 to $columnstart-$columnend" if(!defined $columnstart || !defined $columnend);
     return ($columnstart,$columnend,$querybv);
 }
 
@@ -731,13 +762,21 @@ sub columntocoords{
 			#Use the bit vectors to find next matching position between current seq and query
 			my $intersectbv = new Bit::Vector($querybv->Size());
 			$intersectbv->Intersection($querybv,$currbv); 
-			die if($currbv->bit_test($currcount+1));
-			die if($intersectbv->bit_test($currcount+1));
+			die if($QCCHECKS && $currbv->bit_test($currcount+1));
+			die if($QCCHECKS && $intersectbv->bit_test($currcount+1));
 			my($imin,$imax) = $intersectbv->Interval_Scan_inc($currcount+1);
 			my($cmin,$cmax) = $currbv->Interval_Scan_inc($currcount+1);
 			if(! defined $cmin || ! defined $imin){
 			    print "INGAP Can't find matching position in $aln->[0] > columnstart:$columnstart. Returning no mapping\n" if($DEBUG > 1);
-			    return ($aln->[1],$aln->[1],$currbv);
+			    if($orient eq '-'){
+				$start = $aln->[2]-$matches;
+			    }
+			    else{
+				#Start is alignment start (s1) + matching columns 
+				$start = $aln->[1]+$matches-1;
+			    }
+			    #return ($aln->[1],$aln->[1],$currbv);
+			    return ($start,$start,$currbv);
 			}
 			if($imin>$columnend){
 			    #|-------*MMMMMMM*-----------| Query columnstart -> columnend
@@ -754,8 +793,9 @@ sub columntocoords{
 			#next matching position in the query
 			my $nummatches=0;
 			if($cmin>0){
-			    die "Bad match index after scan $cmin" if($currbv->bit_test($cmin)!=1);
+			    die "Bad match index after scan $cmin" if($QCCHECKS && $currbv->bit_test($cmin)!=1);
 			}
+			#TODO replace with Interval_Scan
 			for(my $i=$cmin;$i<=$imin;$i++){
 			    if($currbv->bit_test($i)){
 				$nummatches++;
@@ -795,24 +835,28 @@ sub columntocoords{
 			    #Report last matching position
 			    #Last matching position is defined by last overlapping M interval between 
 			    #query and current sequence
-			    my $intersectbv = new Bit::Vector($querybv->Size());
-			    $intersectbv->Intersection($querybv,$currbv);
-			    die if($currbv->bit_test($currcount+1));
-			    die if($intersectbv->bit_test($currcount+1));
-			    my($imin,$imax) = $intersectbv->Interval_Scan_dec($currcount+1);
-			    my($cmin,$cmax) = $currbv->Interval_Scan_dec($currcount+1);
-			    my $nummatches=0;
-			    if(! defined $cmax || !defined $imax){
-				die "INGAP Can't find matching position in $aln->[0] < columnend:$columnend. No last matching position\n" if($DEBUG > 1);
-			    }
-			    else{
-				for(my $i=$cmax;$i>=$imax;$i--){
-				    if($currbv->bit_test($i)){
-					$nummatches++;
+			    if($QCCHECKS){
+				my $intersectbv = new Bit::Vector($querybv->Size());
+				$intersectbv->Intersection($querybv,$currbv);
+				die if($currbv->bit_test($currcount+1));
+				die if($intersectbv->bit_test($currcount+1));
+				my($imin,$imax) = $intersectbv->Interval_Scan_dec($currcount+1);
+				my($cmin,$cmax) = $currbv->Interval_Scan_dec($currcount+1);
+				my $nummatches=0;
+				if(! defined $cmax || !defined $imax){
+				    die "INGAP Can't find matching position in $aln->[0] < columnend:$columnend. No last matching position\n" if($DEBUG > 1);
+				}
+				else{
+				    if($DEBUG>1){
+					for(my $i=$cmax;$i>=$imax;$i--){
+					    if($currbv->bit_test($i)){
+						$nummatches++;
+					    }
+					}
 				    }
 				}
+				print "INGAP $nummatches until next match between query and $aln->[0] at column $cmax-$imax\n" if($DEBUG > 1);
 			    }
-			    print "INGAP $nummatches until next match between query and $aln->[0] at column $cmax-$imax\n" if($DEBUG > 1);
 			    if($orient eq '-'){
 				$end = $aln->[2]-$matches;
 			    }
@@ -883,13 +927,26 @@ sub getAlignment{
     }
 }
 
+#If passed with no start/end, then returns first interval encountered
 #Assumes one interval per genome, per alignment
 sub getAlignedInterval{
-    my($self,$align_name,$seqname) = @_;
+    my($self,$align_name,$seqname,$qstart,$qend) = @_;
+    die if(!$seqname);
     my $alignobj = $self->{_alignments}->{$align_name}->[0];
     foreach my $alni (@$alignobj){
 	if($alni->[0] eq $seqname){
-	    return $alni;
+	    if(! defined $qstart && !defined $qend){
+		return $alni;
+	    }
+	    else{
+		if(($qstart < $alni->[1] && $qend < $alni->[1]) || ($qstart > $alni->[2] && $qend > $alni->[2])){
+		    print "#Non overlapping alignment on $seqname: $qstart < $alni->[1] && $qend < $alni->[1]) || ($qstart > $alni->[2] && $qend > $alni->[2]\n" if($self->{_debug});
+		    #Non-overlapping
+		}
+		else{
+		    return $alni;
+		}
+	    }
 	}
     }
     print "#Can't find $seqname on alignment $align_name\n";
@@ -900,11 +957,10 @@ sub getAlignedInterval{
 #
 #Returns closed interval [$startcol,$endcol]
 sub getAlignmentMatrix {
-    my($self,$align_name,$startcol,$endcol,$db) = @_;
+    my($self,$align_name,$startcol,$endcol,$db,$ref,@seqs) = @_;
     if(!$startcol){
 	$startcol=0;
     }
-    
     die "Can't find alignment $align_name" if(!exists $self->{_alignments}->{$align_name});    
     my ($alignobj,$gv,$align_width) = @{$self->{_alignments}->{$align_name}};
     die "Bad input columns $startcol-$endcol $startcol >$align_width || $endcol > $align_width" if($startcol >$align_width || $endcol > $align_width);
@@ -917,59 +973,96 @@ sub getAlignmentMatrix {
 
     my $alni;
 
+    my $namesfilter = {};
+    foreach my $s (@seqs){
+	$namesfilter->{$s}=1;
+    }
+    my $skipfilter = (scalar(keys %$namesfilter)>0) ? 0 : 1;
+    if($ref){
+	$namesfilter->{$ref}=1;
+	my $refi;
+	for(my $i=0;$i<(@$alignobj);$i++){
+	    if($alignobj->[$i]->[0] eq $ref){
+		$refi=$i;
+		last;
+	    }
+	}
+	my $tmpi = $alignobj->[0];
+	$alignobj->[0] = $alignobj->[$refi];
+	$alignobj->[$refi] = $tmpi;
+    }
     if(!$endcol){
 	$endcol=$align_width;
     }
 
     foreach my $alni (@$alignobj){
-	my $matchcount=0;
-	my $column=1;
-	my $mstr = '-'x ($align_width+1);
-	my $sstr = '-'x ($align_width+1);
-	push @names,$alni->[0];
-	my ($cigs,$columncount) = &get_cigs($alni->[4]);
-
-	foreach my $c (@$cigs){
-	    my($count,$char) = @$c;
-	    if($char eq 'M'){
-		my $mmstr = '.' x $count;
-		die if(length($mmstr)!=$count);
-		substr($mstr,$column) = $mmstr;
-		my $seqobj = $db->get_Seq_by_id($alni->[0]);
-		if($seqobj){
-		    die if($alni->[1]>$alni->[2]);
-		    my $str;
-		    #print "$alni->[1]+$matchcount,$alni->[1]+$matchcount+$count-1\n";
-		    if($alni->[3] eq '+'){
-			$str = $seqobj->subseq($alni->[1]+$matchcount+1,$alni->[1]+$matchcount+$count);
+	if($skipfilter || $namesfilter->{$alni->[0]}==1){
+        #my $seqobj = $db->get_Seq_by_id($alni->[0]);
+	    my $seqobj = $db->{$alni->[0]};
+	    my $seq = $seqobj->seq();
+	    die "Can't find seq $alni->[0]\n" if(!$seqobj);
+	    my $matchcount=0;
+	    my $column=1;
+	    #my $mstr = '-'x ($align_width+1);
+	    $matrix->[$row] = '-'x ($align_width+1);
+	    #my $sstr = '-'x ($align_width+1);
+	    $seqmatrix->[$row]='-'x ($align_width+1);
+	    #push @names,$alni->[0];
+	    $names[$row] = $alni->[0];
+	    my ($cigs,$columncount) = &get_cigs($alni->[4]);
+	    foreach my $c (@$cigs){
+		my($count,$char) = @$c;
+		if($char eq 'M'){
+		    if(($column >= $startcol && $column <= $endcol)
+		       ||
+		       ($startcol >= $column && $startcol <= ($column+$count))){
+			#my $mmstr = '.' x $count;
+			#die if(length($mmstr)!=$count);
+			#substr($mstr,$column) = $mmstr;
+			substr($matrix->[$row],$column,$count,'.' x $count);# if($column >= $startcol && $column <= $endcol);
+			#die if($self->{_debug} && $alni->[1]>$alni->[2]);
+			#my $str;
+			#print "$alni->[1]+$matchcount,$alni->[1]+$matchcount+$count-1\n";
+			if($alni->[3] eq '+'){
+			    #$str = $seqobj->subseq($alni->[1]+$matchcount+1,$alni->[1]+$matchcount+$count);
+			    #$str = substr($seq,$alni->[1]+$matchcount,($alni->[1]+$matchcount+$count)-($alni->[1]+$matchcount)+1);
+			    substr($seqmatrix->[$row],$column,$count,substr($seq,$alni->[1]+$matchcount,$count));# if($column >= $startcol && $column <= $endcol);
+			}
+			else{
+			    #Note cigar always denotes offset from alignment start
+			    #In '-' orient, cigar starts from $alni->[2]--->$alni->[1]
+			    #$str = revcom($seqobj->subseq($alni->[2]-$matchcount-$count+1,$alni->[2]-$matchcount))->seq();
+			    #$str = revcom(substr($seq,$alni->[2]-$matchcount-$count,($alni->[2]-$matchcount)-($alni->[2]-$matchcount-$count)+1));
+			    
+			    #substr($sstr,$column,$count,revcom(substr($seq,$alni->[2]-$matchcount-$count,$count)));
+			    substr($seqmatrix->[$row],$column,$count,revcom(substr($seq,$alni->[2]-$matchcount-$count,$count))->seq());# if($column >= $startcol && $column <= $endcol);
+			    
+			}
+			#die length($str)." != $count" if(length($str)!=$count);
+			#die if($self->{_debug} && length($str)!=length($mmstr));
+			#substr($sstr,$column,length($str)) = $str;
+			#die if($self->{_debug} && substr($sstr,$column,length($str)) ne $str);
 		    }
-		    else{
-			#Note cigar always denotes offset from alignment start
-			#In '-' orient, cigar starts from $alni->[2]--->$alni->[1]
-			$str = revcom($seqobj->subseq($alni->[2]-$matchcount-$count+1,$alni->[2]-$matchcount))->seq();
-		    }
-		    die length($str)." != $count" if(length($str)!=$count);
-		    die if(length($str)!=length($mmstr));
-		    substr($sstr,$column,length($str)) = $str;
-		    die if(substr($sstr,$column,length($str)) ne $str);
+		    $matchcount+=$count;
 		}
 		else{
-		    die "Can't find seq $alni->[0]\n";
+		    #my $mmstr = '-' x $count;
+		    #die if($self->{_debug} && length($mmstr)!=$count);
+		    #substr($mstr,$column) = $mmstr;
+		    if(($column >= $startcol && $column <= $endcol)
+		       ||
+		       ($startcol >= $column && $startcol <= ($column+$count))){
+			substr($matrix->[$row],$column,$count,'-' x $count);#  if($column >= $startcol && $column <= $endcol);
+		    }
 		}
-		$matchcount+=$count;
+		$column+=$count;
 	    }
-	    else{
-		my $mmstr = '-' x $count;
-		die if(length($mmstr)!=$count);
-		substr($mstr,$column) = $mmstr;
-	    }
-	    $column+=$count;
+	    #$matrix->[$row]=$mstr;
+	    #$seqmatrix->[$row]=$sstr;
+	    $row++;
 	}
-	$matrix->[$row]=$mstr;
-	$seqmatrix->[$row]=$sstr;
-	$row++;
     }
-
+    
     die "Invalid range $startcol-$endcol" if($endcol < $startcol);
 
     my $retmatrix=[];
@@ -982,7 +1075,9 @@ sub getAlignmentMatrix {
     }
     #remove same characters
     #this is really going to really slow in perl this way
+    my $mcount;
     for(my $i=1;$i<@$retmatrix;++$i){ 
+	my $m=0;
 	for(my $j=0;$j<length($retseqmatrix->[$i]);$j++){
 	    my $topchar = uc(substr($retseqmatrix->[0],$j,1));
 	    if(uc(substr($retseqmatrix->[$i],$j,1)) ne $topchar){
@@ -993,12 +1088,15 @@ sub getAlignmentMatrix {
 		    substr($retmatrix->[$i],$j,1) = '-';
 		}
 		else{
+		    $m++;
 		    substr($retmatrix->[$i],$j,1) = '.';
 		}
 	    }
 	}
+	$mcount->{$i} = $m;
     }
-    return ($retmatrix,$retseqmatrix,\@names);
+    $mcount->{0} = 1000000000;#$align_width+1;
+    return ($retmatrix,$retseqmatrix,\@names,$mcount);
 }
 
 sub contains{
@@ -1009,35 +1107,38 @@ sub contains{
 	if($alni->[0] eq $qseqname){
 	    if($coord1<$alni->[1] || $coord1>$alni->[2]){
 		#print "Start position $coord1 is not contained in interval $qseqname:$alni->[1]-$alni->[2]\n";
-		return 0;
+		return 0 if(!$nodups);
 	    }
 	    elsif($coord2<$alni->[1] || $coord2>$alni->[2]){
 		#print "End position $coord2 is not contained in interval $qseqname:$alni->[1]-$alni->[2]\n";
-		return 0;
+		return 0 if(!$nodups);
 	    }
 	    return 1;
 	}
     }
-    
+    return 0;
 }
 
 #mappedfeats in the form [name,seq,start,end]
 sub printAlignment{
-    my($self,$aln,$startcol,$endcol,$db,$mappedfeats) = @_;
+    my($self,$fh,$aln,$startcol,$endcol,$db,$ref,$mappedfeats,$htmlout) = @_;
     die "Must specify Bioperl database $db that contains sequence data" if(!$db);
     die "Must specify startcol, endcol $startcol-$endcol" if(!$startcol || !$endcol);
     my($alignobj,$alignment_bv,$align_width) = @{$self->{_alignments}->{$aln}};
 
     #$mmatrix,$seqmatrix are relative to $startcol, index starting at 0
-    my ($mmatrix,$seqmatrix,$names) = $self->getAlignmentMatrix($aln,$startcol,$endcol,$db);
+    my ($mmatrix,$seqmatrix,$names,$mcount) = $self->getAlignmentMatrix($aln,$startcol,$endcol,$db,$ref);
     my $COL_WIDTH=100;
     my $atree = new AlignmentTree();
     my $features = {};
+
     foreach my $feat (@$mappedfeats){
 	$atree->insert(@$feat);
 	$features->{$feat->[1]} = [$feat->[0]->[0]->[1],$feat->[0]->[0]->[2]];
     }
+    my @mcountsort = sort {$mcount->{$b}<=>$mcount->{$a}} (keys %{$mcount});
     for(my $j=0;$j<=(($endcol-$startcol)/$COL_WIDTH);$j++){
+	my $anchors; #for html output
 	my $s=$j*$COL_WIDTH+1;
 	my $e=$s+$COL_WIDTH-1;
 	$e = ($e>($endcol-$startcol+1)) ? ($endcol-$startcol+1) : $e;
@@ -1045,46 +1146,64 @@ sub printAlignment{
 	#offset into full alignment $aln
 	my $absstartcol = $s+$startcol-1;
 	my $absendcol = $e+$startcol-1;
-	for(my $i=0;$i<@$names;$i++){
+	foreach my $i (@mcountsort){
+	    #for(my $i=0;$i<@$names;$i++){
+	    die if(! $names->[$i]);
 	    my($alni) = $self->getAlignedInterval($aln,$names->[$i]);
 	    my($start,$end) = &columntocoords($alni,$absstartcol,$absendcol);
-	    push @coords,[$start,$end,$alni->[3]];
+	    $coords[$i] = [$start,$end,$alni->[3]];
 	    ($start,$end) = ($alni->[3] eq '-') ? ($end,$start) : ($start,$end);
 	    my $displaystr;
 	    if($i==0){
 		$displaystr = substr($seqmatrix->[$i],$s-1,$e-$s+1);
+		#Highlight Shine Delgarno
+		$displaystr =~ s/AGGAGG/<font color='red'>aggagg<\/font>/g;
 	    }
 	    else{
 		$displaystr = substr($mmatrix->[$i],$s-1,$e-$s+1);
+		$displaystr =~ s/AGGAGG/<font color='red'>aggagg<\/font>/g;
 	    }
 	    if($self->{debug}){
-		printf("%30.30s %7s %11s %-30s %7s %11s\n",
-		       "$names->[$i]:$alni->[3]",
-		       $start,
-		       "col:$absstartcol",
-		       $displaystr,
-		       $end,
-		       "col:$absendcol");
+		printf $fh ("%30.30s %7s %11s %-30s %7s %11s\n",
+			"$names->[$i]:$alni->[3]",
+			$start,
+			"col:$absstartcol",
+			$displaystr,
+			$end,
+			"col:$absendcol");
 	    }
 	    else{
-		printf("%30.30s %7s %11s %-30s %7s %11s\n",
-		       "$names->[$i]:$alni->[3]",
-		       $start,
-		       "",
-		       $displaystr,
-		       $end,
-		       "");
+		if($htmlout){
+		    printf $fh ("%30.30s %7s %11s %-30s %7s %11s\n",
+			    "$names->[$i]:$alni->[3]",
+			    $start,
+			    "",
+			    $displaystr,
+			    $end,
+			    ""); 
+		    
+		}
+		else{
+		    printf $fh ("%30.30s %7s %11s %-30s %7s %11s\n",
+			   "$names->[$i]:$alni->[3]",
+			   $start,
+			   "",
+			   $displaystr,
+			   $end,
+			   "");
+		}
 	    }
 	}
-	printf("%".$COL_WIDTH.".".$COL_WIDTH."s","$aln col:$absstartcol-$absendcol\n");
-	for(my $i=0;$i<@$names;$i++){
+	printf $fh ("%".$COL_WIDTH.".".$COL_WIDTH."s","$aln col:$absstartcol-$absendcol\n");
+	foreach my $i (@mcountsort){
+	    #for(my $i=0;$i<@$names;$i++){
 	    #Show all matching features that intersect $coords[$i]->[0],$coords[$i]->[1]
 	    if($coords[$i]->[1]-$coords[$i]->[0]>1){
 		my @res = $atree->intersect($names->[$i],$coords[$i]->[0],$coords[$i]->[1],'gene');
 		foreach my $r (@res){
 		    
 		    #offset into full alignment $aln
-		    my($cs,$ce) = &coordstocolumn($alignobj,$names->[$i],$r->[2],$r->[3]);
+		    my($cs,$ce) = &coordstocolumn($alignobj,$names->[$i],$r->[2],$r->[3],1);
 		    #print "$r->[0] coords:$r->[2],$r->[3] $cs,$ce $cs-$absstartcol $absendcol-$ce\n";
 		    my $leadinggap = 'X'x($cs-$absstartcol);
 		    my $trailinggap = 'X'x($absendcol-$ce);
@@ -1097,6 +1216,8 @@ sub printAlignment{
 		    #currently only viz start,stop codons at beginning/end of alignment
 		    #print "$r->[2] <= $features->{$r->[0]}->[0] && $r->[3] >= $features->{$r->[0]}->[0]\n";
 		    if($r->[2] <= $features->{$r->[0]}->[0] && $r->[3] >= $features->{$r->[0]}->[0]){
+			$anchors->{"$aln:$cs"}++;
+			$anchors->{"$aln:$ce"}++;
 			my $showfirst = 3;
 			if($ce-$cs<3){
 			    $showfirst = ($ce-$cs);
@@ -1112,6 +1233,7 @@ sub printAlignment{
 				#$stopcodonstr = 'CAT';
 				#$stopcodonstr = substr($seqmatrix->[$i],$cs-$absstartcol-($COL_WIDTH-$showfirst),$showfirst);
 				$displaytoken .= '<--START1';
+				$anchors->{"$r->[0]"}++;
 			    }
 			}
 			else{
@@ -1125,11 +1247,14 @@ sub printAlignment{
 				#$startcodonstr = 'ATG';
 				#$startcodonstr = substr($seqmatrix->[$i],$cs-$absstartcol+($j*$COL_WIDTH),$showfirst);
 				$displaytoken .= 'START2-->';
+				$anchors->{"$r->[0]"}++;
 			    }
 			}
 		    #TODO trim to row
 		    }
 		    if($r->[2] <= $features->{$r->[0]}->[1] && $r->[3] >= $features->{$r->[0]}->[1]){
+			$anchors->{"$aln:$cs"}++;
+			$anchors->{"$aln:$ce"}++;
 			my $showfirst = 3;
 			if($ce-$cs<3){
 			    $showfirst = ($ce-$cs)+1;
@@ -1140,6 +1265,7 @@ sub printAlignment{
 				#$startcodonstr = 'ATG';
 				#$startcodonstr = substr($seqmatrix->[$i],$cs-$absstartcol+($j*$COL_WIDTH),$showfirst);
 				$displaytoken .= 'START3-->';
+				$anchors->{"$r->[0]"}++;
 			    }
 			    else{
 				#$startcodonstr = 'TTA';
@@ -1153,6 +1279,7 @@ sub printAlignment{
 				#$stopcodonstr = 'CAT';
 				#$stopcodonstr = substr($seqmatrix->[$i],$absendcol-$ce-$showfirst,$showfirst);
 				$displaytoken .= '<--START4';
+				$anchors->{"$r->[0]"}++;
 			    }
 			    else{
 				#$stopcodonstr = 'TAA';
@@ -1218,17 +1345,34 @@ sub printAlignment{
 			}
 		    }		    
 		    die if($r->[6] ne $r->[7]);
-		    printf("%30.30s %7s %11s %-30s %7s %11s\n",
-			   $r->[0].":$r->[6]",
-			   $feat_start,
-			   $displaytoken,
-			   $fulldisplaystr,
-			   $feat_end,
-			   $displaytoken);
+		    if($htmlout){
+			printf $fh ("%30.30s %7s %11s %-30s %7s %11s\n",
+				$r->[0].":$r->[6]",
+				$feat_start,
+				$displaytoken,
+				$fulldisplaystr,
+				$feat_end,
+				$displaytoken);	
+		    }
+		    else{
+			printf $fh ("%30.30s %7s %11s %-30s %7s %11s\n",
+			       $r->[0].":$r->[6]",
+			       $feat_start,
+			       $displaytoken,
+			       $fulldisplaystr,
+			       $feat_end,
+			       $displaytoken);
+		    }
 		}
 	    }
 	}
-	printf("%".$COL_WIDTH.".".$COL_WIDTH."s","ANNOTATIONS\n");
+	if($htmlout){
+	    foreach my $a (keys %$anchors){
+		print $fh "<a href='#$a'></a>\n";
+	    }
+	}
+	
+	printf $fh ("%".$COL_WIDTH.".".$COL_WIDTH."s","ANNOTATIONS\n");
     }
 }
 
@@ -1240,6 +1384,41 @@ sub printAlignmentDebug{
 	}
 	print $handle "#ALIGNOBJ $alignobj ",join(' ',@$alni2),"\n";
     }
+}
+
+sub revcomp{
+    my($aln) = @_;
+    my @naln;
+    foreach my $alni (@$aln){
+	push @naln,&revcomp_alni($alni);
+    }
+    return \@naln;
+}
+
+sub revcomp_alni{
+    my($alni) = @_;
+    my $cigstr;
+    my $nalni = [$alni->[0],$alni->[1],$alni->[2]];
+    $nalni->[3] = ($alni->[3] eq '+') ? '-' : '+'; 
+    my ($cigs,$columncount) = &get_cigs($alni->[4]);
+    foreach my $c (@$cigs){
+	my($count,$char) = @$c;
+	if($c eq 'M' || $c eq 'X'){
+	    $cigstr .= "$count$c";
+	}
+	elsif($c eq 'I'){
+	    $cigstr .= "$count"."D";
+	}
+	elsif($c eq 'D'){
+	    $cigstr .= "$count"."I";
+	}
+	else{
+	    $cigstr .= "$count$c";
+	}
+    }
+    die if(length($cigstr)!=$columncount);
+    $nalni->[4] = $cigstr;
+    return $nalni;
 }
 
 sub removeOverlaps{

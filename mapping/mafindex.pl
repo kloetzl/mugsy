@@ -7,7 +7,8 @@
 
 
 use strict;
-use lib '/usr/local/projects/angiuoli/developer/sangiuoli/mugsy/trunk/mapping';
+use lib '/usr/local/projects/angiuoli/mugsy_trunk/mapping';
+use lib './';
 use AlignmentTree;
 use Storable qw(store retrieve);
 use Data::Dumper;

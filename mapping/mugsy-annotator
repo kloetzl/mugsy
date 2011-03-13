@@ -1,5 +1,5 @@
 #!/bin/sh
-#USAGE: mugsymapper allgenomes.fsa aln.maf *.gbk
+#USAGE: mugsy-annotator allgenomes.fsa aln.maf *.gbk
 #
 #Features can be either a GFF3 file, a GBK genbank flat file, or 5 column text files ($featname $seqname $fmin $fmax $strand )
 #Generate a multi-FASTA file with all your genome sequences
@@ -27,7 +27,7 @@ for gff in $@
       cat $gff >> /tmp/$$.gff
   fi
 done
-
+echo "Building index for features" >&2
 $PREFIX/featureindex.pl $IDXFILE gff < /tmp/$$.gff > /tmp/$$.featidx
 echo "Mapping features" >&2
 $PREFIX/mapfeatures.pl $IDXFILE $FSAFILE < /tmp/$$.gff 
