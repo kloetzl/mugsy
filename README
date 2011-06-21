@@ -23,7 +23,7 @@ The core executables are
 mugsyWGA - whole genome aligner based on Seqan::TCoffee
 
 synchain-mugsy - segmentation program to produce locally collinear
-blocks LCBs from a set of anchors
+blocks (LCBs) from a set of anchors
 
 nucmer - 3.20 release bundled for convenience with new utility
 delta2maf and modified delta-filter to add support for reporting

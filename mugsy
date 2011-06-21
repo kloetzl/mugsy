@@ -36,7 +36,8 @@ See http://mugsy.sf.net for more information
 =head1 INPUT
 
 Input is one or more (multi)FASTA files, one per genome. Each file
-should contain all the sequences for a single organism/species.
+should contain all the sequences for a single organism/species. The
+filename is used as the genome name.
 
 Limitations on FASTA input:
  input FASTA headers must not contain ':' or '-'
@@ -46,7 +47,8 @@ Common options:
 
     -p|prefix       prefix for output files
 
-    --directory     directory used to store output and temporary files
+    --directory directory used to store output and temporary
+      files. Must be a absolute path
 
     -d|--distance   maximum distance along a single sequence (bp) for
      chaining anchors into locally colinear blocks (LCBs).  This is
@@ -78,7 +80,12 @@ Other options:
 
     -refine run an second iteration of Mugsy on each LCB to refine the
      alignment using either Mugsy (--refine mugsy), FSA (--refine
-     fsa), Pecan (--refine pecan), MLAGAN (--refine mlagan)
+     fsa), Pecan (--refine pecan), MLAGAN (--refine mlagan). Requires
+     necessary tools are in your path:  
+     fsa: fsa
+     pecan: muscle,exonerate, in the path. classpath set for bp.pecan.Pecan.
+     mlagan: mlagan.sh
+
 
     -debug           debug level. > 2 verbose
 
@@ -152,7 +159,7 @@ my $results = GetOptions (\%options,
     'skipsearch',
     'skiprefine',
     'allownestedlcbs',
-    'refine',
+    'refine:s',
     'colinear',
     'skipunique',
     'duplications=s',
@@ -301,6 +308,9 @@ if(defined $options{'collinear'}){
     $options{'nucmeropts'} .= $options{'nucmeropts'}." -maxmatch";
 }
 die "Cannot pass both --refine and --skiprefine" if(exists $options{'refine'} && exists $options{'skiprefine'});
+if(exists $options{'refine'}){
+    $options{'keeptmpfiles'}=1;
+}
 
 if(!exists $options{'refine'} && !exists $options{'skiprefine'}){
     $options{'skiprefine'}='true';
@@ -333,11 +343,11 @@ my $seqfiles = {};
 my $genome2seqslookup = {}; 
 my $seqlengthlookup = {};
 
-my @allfastafiles;
+#my $allfastafiles = {};
 
 my $cleanregex = '[\-]';
 
-#Aggregate all sequences for a lineage and concatenate together    
+#Cleanup directory
 foreach my $seqfile (@inputseqfiles){
     if(! -e $seqfile){
 	die "Invalid input file. Can't find $seqfile\n";
@@ -349,6 +359,14 @@ foreach my $seqfile (@inputseqfiles){
     $fname =~ s/$cleanregex/_/g;
     my $speciesname = $fname;
     unlink "$options{'directory'}/$speciesname" if(-e "$options{'directory'}/$speciesname");
+}
+#Aggregate all sequences for a lineage and concatenate together    
+foreach my $seqfile (@inputseqfiles){
+    my $fname = basename($seqfile);
+    $fname =~ s/\.[^.]+//g;
+    $fname =~ s/$cleanregex/_/g;
+    my $speciesname = $fname;
+    print STDERR "Parsing sequences for $speciesname ";
     my $header;
     my $seqlen=0;
     my @seqs;
@@ -422,7 +440,7 @@ foreach my $seqfile (@inputseqfiles){
 	$seqfiles->{"$options{'directory'}/$speciesname"}++;
     }
     close FILE; 
-    push @allfastafiles,"$options{'directory'}/$speciesname";
+    print STDERR " num_seqs:",scalar(@{$genome2seqslookup->{$speciesname}}),"\n";
 }
 
 my @genomenodes;
@@ -553,7 +571,7 @@ for(my $i=0;$i<@genomenodes;$i++){
 	}
 	unlink "$absprefix.$genomename1.queries.fsa" if(! defined $options{'keeptmpfiles'});
 	#Keep for --plot
-	if(! defined $options{'plot'} && ! defined $options{'keepsearchfiles'}){
+	if(! defined $options{'plot'} && ! defined $options{'keepsearchfiles'} && ! defined $options{'duplications'}){
 	    unlink "$deltafile" if(! defined $options{'keeptmpfiles'});
 	}
 	unlink "$absprefix.$genomename1.delta" if(! defined $options{'keeptmpfiles'});
@@ -578,7 +596,7 @@ if($method eq "mugsywga"){
     print STDERR "Starting MUGSYWGA: ",`date`;
     my $pwdupsfasta = "$absprefix.dups.xmfa";
     print $logfh `rm -f $allfsafile`;
-    foreach my $fsafile (@allfastafiles){
+    foreach my $fsafile (keys %$seqfiles){
 	#HACK 
 	#Temp fix for headers 
 	my $perlcmd = q|perl -ne 'if(/^\>([^\s\:]+)\:([^\s\:]+)/){if($1 ne $2){ print ">$1.$2 $1\n";} elsif(defined $1 && defined $2){print ">$1.$2\n";}else {print ">$1\n";}}else{die if(/\>/);print $_}'|;

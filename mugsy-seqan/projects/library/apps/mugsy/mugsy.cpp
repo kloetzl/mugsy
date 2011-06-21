@@ -2835,7 +2835,6 @@ void runIterativeMUGSY(std::string & outputdir,
 	    << " --distance " << msaOpt.distance
 	    << " --minlength 15"
 	    << " --nucmeropts \"-l 10 -c 15\"" //relax matchlen
-    //+" --minlength "+msaOpt.minlength 
     //TODO consider removing this option during refine to allow for refinement of short blocks
 	    << " --skipunique --directory " << outputdir 
 	    << " --skiprefine --colinear "
@@ -2991,7 +2990,8 @@ void refineMSA(const char * maffile,
 	if(msaOpt.refine=="pecan"){
 	  //Support for pecan aligner
 	  std::ostringstream treecmd;
-	  treecmd << "cat " << fastafiles.str() << " | /usr/local/projects/angiuoli/developer/sangiuoli/muscle/trunk/muscle -clusteronly -in - -tree1 /tmp/pecan.tree 1> /dev/null 2> /dev/null";
+	  //treecmd << "cat " << fastafiles.str() << " | /usr/local/projects/angiuoli/developer/sangiuoli/muscle/trunk/muscle -clusteronly -in - -tree1 /tmp/pecan.tree 1> /dev/null 2> /dev/null";
+	  treecmd << "cat " << fastafiles.str() << " | muscle -clusteronly -in - -tree1 /tmp/pecan.tree 1> /dev/null 2> /dev/null";
 	  int ret = system(treecmd.str().c_str());
 	  if(ret!=0){
 	    std::cerr << treecmd.str() << std::endl 
@@ -2999,7 +2999,8 @@ void refineMSA(const char * maffile,
 	  }
 	  
 	  std::ostringstream refinecmd;
-	  refinecmd << "java -cp /usr/local/projects/angiuoli/developer/sangiuoli/pecan_v0.8/pecan_v0.8.jar bp.pecan.Pecan -J /usr/local/projects/angiuoli/developer/sangiuoli/exonerate-2.2.0-x86_64/bin/exonerate -E `cat /tmp/pecan.tree | perl -ne 'chomp;print'` -F " << fastafiles.str() << " >> pecan." << getpid() << ".mfa";
+	  //refinecmd << "java -cp /usr/local/projects/angiuoli/developer/sangiuoli/pecan_v0.8/pecan_v0.8.jar bp.pecan.Pecan -J /usr/local/projects/angiuoli/developer/sangiuoli/exonerate-2.2.0-x86_64/bin/exonerate -E `cat /tmp/pecan.tree | perl -ne 'chomp;print'` -F " << fastafiles.str() << " >> pecan." << getpid() << ".mfa";
+	  refinecmd << "java -cp pecan_v0.8.jar bp.pecan.Pecan -J exonerate -E `cat /tmp/pecan.tree | perl -ne 'chomp;print'` -F " << fastafiles.str() << " >> pecan." << getpid() << ".mfa";
 	  ret = system(refinecmd.str().c_str());
 	  if(ret!=0){
 	    std::cerr << refinecmd.str() << std::endl 
@@ -3010,7 +3011,8 @@ void refineMSA(const char * maffile,
 	}
 	else if(msaOpt.refine == "mlagan"){
 	  std::ostringstream refinecmd;
-	  refinecmd << "/usr/local/projects/angiuoli/developer/sangiuoli/lagan20/mlagan.sh " << fastafiles.str() << " >> lagan."<< getpid() << ".mfa 2> /dev/null";
+	  //refinecmd << "/usr/local/projects/angiuoli/developer/sangiuoli/lagan20/mlagan.sh " << fastafiles.str() << " >> lagan."<< getpid() << ".mfa 2> /dev/null";
+	  refinecmd << "mlagan.sh " << fastafiles.str() << " >> lagan."<< getpid() << ".mfa 2> /dev/null";
 	  int ret = system(refinecmd.str().c_str());
 	  if(ret!=0){
 	    std::cerr << refinecmd.str() << std::endl 

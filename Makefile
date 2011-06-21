@@ -29,6 +29,7 @@ mugsy_install:
 	install synchain-mugsy ${INSTALL_DIR}
 
 	install maf2fasta.pl ${INSTALL_DIR}
+	install xmfa2maf.pl ${INSTALL_DIR}
 	install fixMAFnames.pl ${INSTALL_DIR}
 	install splitmaf.pl ${INSTALL_DIR}
 	install plot.pl ${INSTALL_DIR}
