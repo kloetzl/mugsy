@@ -56,7 +56,10 @@ while(my $line=<STDIN>){
 	$blocks = [];
     }
     #Format >id1:start-end orient id2
-    elsif($line =~ /^>\s*(\S+)\:(\d+)-(\d+)\s+([\+\-])\s+(\S+)/){
+    elsif(($line =~ /^>\s+\S+\:/ && 
+	   $line =~ /^>\s*(\S+)\:(\d+)-(\d+)\s+([\+\-])\s+(\S+)/)
+	  || 
+	  $line =~ /^>(\S+)\s+(\d+)\s+(\d+)\s+([\+\-])\s+(\S+)/){
 	chomp $line;
 	if(defined $seqname && $start>0){
 	    push @$blocks,[$seqname,$start-1,$end,$orient,$seqinfo];
