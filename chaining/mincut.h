@@ -395,19 +395,6 @@ int breakLCBmincutconnect(std::vector<LCB > &componentMap,
       std::cerr << "Graph built for lcbidx:" << lcbcount << " V:" << num_vertices(currlcbg) << " E:" << num_edges(currlcbg) << std::endl; 
 #endif
     //
-    //Write out DOT formatted file
-    //for debugging
-      /*
-      boost::dynamic_properties dp;
-      dp.property("id", get(vertex_name, currlcbg));
-      //Open file
-      std::ofstream gout;
-      std::ostringstream fnamestr;
-      fnamestr << "gout.cc." << lcbcount << ".dot"; 
-      gout.open(fnamestr.str().c_str());
-      write_graphviz(gout, currlcbg, dp, std::string("id"));
-      gout.close();
-      */
       //Condition (2) - conflicting orientation
       //Check orientation on this one seq      
       //Condition (3) - multiple seqs per genome
@@ -418,11 +405,15 @@ int breakLCBmincutconnect(std::vector<LCB > &componentMap,
 
     for(gpos = seqspergenomeMap.begin();gpos!=seqspergenomeMap.end();++gpos){
       if(gpos->second.size()>1){
-	//std::cerr << "LCB with multiple seqs " << gpos->second.size() << "from same genome, splitting" << std::endl;
+#ifdef DEBUG
+	std::cerr << "LCB with multiple seqs " << gpos->second.size() << " from same genome, splitting" << std::endl;
+#endif
 	std::vector<Label> seqs;
 	for(spos = gpos->second.begin();spos!=gpos->second.end();++spos){//each seq1
 	  seqs.push_back(*spos);
-	  //std::cerr << "Seqs " << *spos << std::endl;
+#ifdef DEBUG
+	  std::cerr << "Seqs " << *spos << std::endl;
+#endif
 	  assert(sequence2genome[*spos]==gpos->first);
 	}
 	std::vector<LVertex> compv;

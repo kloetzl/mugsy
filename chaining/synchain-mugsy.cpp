@@ -145,13 +145,18 @@ using namespace std;
 // draw flow network, cannot be combined with printseqs
 //#define PRINTFLOW
 
-//Defining this option removes all edges connected in a single
-//sequence This is useful for simplying the graph but changes the
-//algorithm to requires homology to one or more sequences for an indel
-//to break a block. Sequence specific indels will not break blocks
-//when this is defined during initial clustering but may be broken
-//during mincut
-//#define TRIMEDGES
+
+//Defining this option removes all edges labelled in a single sequence
+//only. Such edges represent can link to unaligned or non-syntenic
+//regions
+
+#define TRIMEDGES
+
+//This is useful for simplying the graph and improves performance for draft genomes but changes the
+//the algorithm 
+//When defined, sequence specific indels > distance parameter will break blocks automatically
+//When undefined, such indels are broken only during mincut
+
 
 //Mugsy codes 
 #include "graph.h"
@@ -1183,6 +1188,9 @@ int main(int argc, char* argv[])
 
   //Reverse sequence2index map
   for(NameLabelMap::iterator i = sequence2index.begin();i!=sequence2index.end();++i){
+#ifdef DEBUG
+    std::cerr << "Seq idx:" << i->second << " " << i->first << std::endl;
+#endif
     index2sequence[i->second] = i->first;
   }
 
