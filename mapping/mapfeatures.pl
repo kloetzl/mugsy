@@ -402,7 +402,7 @@ while(my $line=<$fh>){
 	    die "Bad orient $orient. $line" if($orient ne '+' && $orient ne '-');
 	    my $i=0;
 	    while(exists $features->{$name}){
-		print "Duplicate named feature $name. Renaming to ${name}_$i\n";
+		print "#Duplicate named feature $name. Renaming to ${name}_$i\n";
 		$name=$name.'_'.++$i;
 	    }
 	    if(!defined $featlist || exists $featlist->{$name}){
