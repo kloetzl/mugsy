@@ -3672,7 +3672,7 @@ _CLUSTERHTMLFOOTER
 		    forceFit: true},
 		    frame: true,
 		    animCollapse: false,
-		    title: 'Cluster 1 annotation summary',
+		    title: 'Cluster ${cluster_id} annotation summary',
 		    iconCls: 'icon-grid',
 		    fbar  : ['->', {
 		    text:'Save as text',
@@ -3731,10 +3731,6 @@ _CLUSTERHTMLFOOTER
 
 _CLUSTERJSHEADER
     ;
-#html: Ext.example.bogusMarkup
-#    autoLoad:{
-#      url:'your.htm'
-#    }
  
     print $jsfh "Ext.grid.clusterData = [";
     foreach my $c (@clustergrid){
@@ -3865,18 +3861,5 @@ _MAINJSHEADER
     close $jsfh;
     close $htmlfh;
 
-#// add in some dummy descriptions
-#for(var i = 0; i < Ext.grid.dummyData.length; i++){
-#}
-
-
-    #Create data store
-
-    #Pie chart
-
-    #Group by quality class
-
-    #Link to clusters
-    
 }
 

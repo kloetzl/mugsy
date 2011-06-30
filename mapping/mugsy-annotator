@@ -7,6 +7,18 @@
 
 PREFIX=/usr/local/projects/angiuoli/mugsy_trunk/mapping
 
+if [ ! -d "$PREFIX" ]
+then
+    echo "Cannot find installation directory $PREFIX. Edit the script to configure a valid directory"
+    exit 1
+fi
+
+if [ $# -lt 3 ]
+then
+    echo "USAGE: mugsy-annotator allgenomes.fsa aln.maf *.gbk"
+    exit 1
+fi
+
 IDXFILE=/tmp/$$.idx
 FSAFILE=$1
 
@@ -30,5 +42,7 @@ done
 echo "Building index for features" >&2
 $PREFIX/featureindex.pl $IDXFILE gff < /tmp/$$.gff > /tmp/$$.featidx
 echo "Mapping features" >&2
+echo "To print with aligment detail. Run $PREFIX/mapfeatures.pl --printalignments $IDXFILE $FSAFILE < /tmp/$$.gff" 
+echo "To print with html reports. Run $PREFIX/mapfeatures.pl --printhtml $IDXFILE $FSAFILE < /tmp/$$.gff" 
 $PREFIX/mapfeatures.pl $IDXFILE $FSAFILE < /tmp/$$.gff 
 

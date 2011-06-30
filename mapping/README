@@ -1,3 +1,13 @@
+##
+#INSTALL
+##
+Untar the mugsy-annotator download to an installation directory
+Edit PREFIX= in the mugsy-annotator script to the install directory
+Add the installation directory to the PERL5LIB environment variable
+eg.
+
+export PERL5LIB=/path/to/mugsy-annotator:${PERL5LIB}
+
 #(1) To run Mugsy-Annotator using the wrapper, you need genome FASTA files and annotations
 #in either gff3 or genbank flat file format
 #first run mugsy to generate a whole genome alignment
