@@ -10,6 +10,13 @@
 #define NDEBUG //define this to disable assert statements
 //#define KEEPCHAINTMP
 
+#define TIMING
+#ifdef TIMING
+#include <time.h>
+time_t now;
+time_t lasttime;
+#endif
+
 //#define DEBUGGING //SVA custom debugging
 //#define DEBUGGING_GRAPH //SVA custom debugging
 //#define DEBUGGING2 //SVA verbose custom debugging
@@ -1623,6 +1630,7 @@ void do_segmentation_MUGSY( std::vector<TBlock> & blocks,
   char * pfilename = toCString(pf);
 
   //(1)Write projection file
+
   std::string projfilename(pfilename);
   projfilename = projfilename + "projections.out";
   writeProjectionFile(projfilename,blocks,sequenceNames,genomeNames);
@@ -1638,7 +1646,17 @@ void do_segmentation_MUGSY( std::vector<TBlock> & blocks,
   //#ifdef DEBUGGING
   std::cerr << "Running " << cmd.c_str() << std::endl;
   //#endif
+  #ifdef TIMING 
+  time(&now);
+  std::cerr << "TIME PRE-SYNCHAIN:" << lasttime << " " << now << " " << now-lasttime << std::endl;
+  lasttime=now;
+  #endif 
   int res = system(cmd.c_str());
+  #ifdef TIMING 
+  time(&now);
+  std::cerr << "TIME SYNCHAIN:" << lasttime << " " << now << " " << now-lasttime << std::endl;
+  lasttime=now;
+  #endif
   if(res!=0){
     perror("Could not run system command: ");
     std::cerr << cmd.c_str() << std::endl 
@@ -1664,6 +1682,11 @@ void do_segmentation_MUGSY( std::vector<TBlock> & blocks,
 #endif
 
   }
+  #ifdef TIMING 
+  time(&now);
+  std::cerr << "TIME POST-SYNCHAIN:" << lasttime << " " << now << " " << now-lasttime << std::endl;
+  lasttime=now;
+  #endif
 }
 
 
@@ -1764,6 +1787,7 @@ void convertCC2Blocks(TGraph &g,
       }
       else{
 	//Repetitive sequence
+	/* Remove to improve reporting of unique sequences
 	if(degree(g,currV)>0){
 	  lostbp = lostbp + fragmentLength(g,currV);
 	  numlostv++;
@@ -1783,6 +1807,7 @@ void convertCC2Blocks(TGraph &g,
 	  t2.blocknum = 0;
 	  ait->second.push_back(t2);
 	}
+	*/
       }
     }
   }
@@ -4097,7 +4122,6 @@ std::vector<s_score> alignLCBs(TGraph &g,
       sscores.colCount=colCount;
       allscores.push_back(sscores);
 #endif
-      
 
       if(msaOpt.unique == "true"){
 	//save interval 
@@ -4207,6 +4231,11 @@ void wholeGenomeAlignment(TGraph &g,
   //
   //std::vector<std::vector<TVertexDescriptor> > LCBs;
   //std::map<TVertexDescriptor,char> vertexOrientMap;
+  #ifdef TIMING 
+  time(&now);
+  std::cerr << "TIME ALIGNMENT_GRAPH:" << lasttime << " " << now << " " << now-lasttime << std::endl;
+  lasttime=now;
+  #endif 
   generateLCBs(g,
 	       LCBs,
 	       seqSet,
@@ -4229,7 +4258,6 @@ void wholeGenomeAlignment(TGraph &g,
   typename std::vector<std::vector<unsigned int> >::const_iterator lit;
   typedef Fragment<> TFragment;
   typedef String<TAlphabet> TSequence;
-
   //Retrieve LCBs from the complete alignment graph $g
   std::vector<s_score> allscores = alignLCBs(g,
 					     LCBs,
@@ -4241,6 +4269,11 @@ void wholeGenomeAlignment(TGraph &g,
 					     strmmaf,
 					     aintervals,
 					     msaOpt);
+  #ifdef TIMING 
+  time(&now);
+  std::cerr << "TIME ALIGN_LCB:" << lasttime << " " << now << " " << now-lasttime << std::endl;
+  lasttime=now;
+  #endif 
 
 #ifdef SEQAN_PROFILE
   std::cerr << std::endl 
@@ -4370,8 +4403,6 @@ void wholeGenomeAlignment(TGraph &g,
   
 #endif 
 
-
-
 }  
 
 //-1 - duplication end
@@ -4411,7 +4442,7 @@ void printUniques(TStringSet &seqSet,
 	  }
 	  else{
 #ifdef DEBUGGING
-	    std::cout << "OPEN:" << open << " coord:" << pit->first << " last_close:" << last 
+	    std::cout << "OPEN:" << open << " type:" << pit->second << " seq: " << ait->first << " coord:" << pit->first << " last_close:" << last 
 		      << " spanlen: " << length(infix(seqSet[i],last,pit->first)) 
 		      << " == " <<  pit->first - last 
 		      << " indup:" << indup <<std::endl;
@@ -4455,7 +4486,7 @@ void printUniques(TStringSet &seqSet,
 	  }
 	  last=pit->first;
 #ifdef DEBUGGING
-	  std:: cout << "CLOSE: " << open << " coord:" << last << std::endl;
+	  std:: cout << "CLOSE: " << open << " type:" << pit->second << " coord:" << last << std::endl;
 #endif
 	}
 	if(last<0){
@@ -5888,6 +5919,10 @@ _initScoreMatrix(CommandLineParser& parser, Dna5 const) {
 
 
 int main(int argc, const char *argv[]){
+#ifdef TIMING 
+  time(&now);
+  lasttime=now;
+#endif
   //////////////////////////////////////////////////////////////////////////////
   // Command line parsing
   //////////////////////////////////////////////////////////////////////////////
