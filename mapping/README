@@ -15,7 +15,7 @@ export PERL5LIB=/path/to/mugsy-annotator:${PERL5LIB}
 mugsy --prefix mygenomes genome1.fsa genome2.fsa genome3.fsa
 #default output is in /tmp/mygenomes.fsa
 cat genome1.fsa genome2.fsa genome3.fsa > allgenomes.fsa
-mugsy-annotator allgenomes.fsa /tmp/mygenomes.fsa genome1.gff genome2.gff genome3.gff
+mugsy-annotator allgenomes.fsa /tmp/mygenomes.maf genome1.gff genome2.gff genome3.gff
 
 #(2) Alternatively, execute the individual steps outside the wrapper
 
