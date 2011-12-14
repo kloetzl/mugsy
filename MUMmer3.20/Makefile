@@ -42,7 +42,7 @@ CSH  := $(filter /%,$(shell /bin/sh -c 'type csh'))
 PERL := $(filter /%,$(shell /bin/sh -c 'type perl'))
 AR   := $(filter /%,$(shell /bin/sh -c 'type ar'))
 
-CPPFLAGS = -Wall -O3 
+CPPFLAGS = -Wall -O3 -DSIXTYFOURBITS
 #-pg -g
 LDFLAGS  =
 

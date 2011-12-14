@@ -53,7 +53,8 @@ ifeq ($(Mode),Debug)
 endif
 ifeq ($(Mode),Release)
 #MODIFIED BY SVA
-	CCFlags += -W -Wall -O3 -march=nocona -mfpmath=sse -msse2
+	CCFlags += -W -Wall -O3 
+#-march=nocona -mfpmath=sse -msse2
 endif
 ifeq ($(Mode),Simple)
 endif
