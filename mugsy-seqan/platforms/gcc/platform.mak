@@ -53,7 +53,8 @@ ifeq ($(Mode),Debug)
 endif
 ifeq ($(Mode),Release)
 #MODIFIED BY SVA
-	CCFlags += -W -Wall -O3 
+	CCFlags += -W -Wall -O3 -mfpmath=sse -msse2
+#Consdier sse,sse2 for intel only build 
 #-march=nocona -mfpmath=sse -msse2
 endif
 ifeq ($(Mode),Simple)

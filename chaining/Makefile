@@ -1,7 +1,7 @@
 #-- Imported variables from top level makefile
 # BIN_DIR AUX_BIN_DIR CXX CC CPPFLAGS LDFLAGS
 
-CPPFLAGS = -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -pedantic -ftemplate-depth-200 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -O3 -Wall
+CPPFLAGS = -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -pedantic -ftemplate-depth-200 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -O3 -Wall -mfpmath=sse -msse2
 #-march=nocona -mfpmath=sse -msse2 
 #-ggdb
 # -march=pentium4

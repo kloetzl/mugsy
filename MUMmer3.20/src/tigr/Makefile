@@ -7,10 +7,11 @@ endif
 ifndef AUX_BIN_DIR
 AUX_BIN_DIR := $(CURDIR)
 endif
-# -O3 -march=nocona -mfpmath=sse -msse2 
+#consider for speed adding sse
+# -O3 -mfpmath=sse -msse2 
 #consider --hash-style=both for portability
-OBJ_RULE = $(CXX) $(CPPFLAGS) -O3 -march=nocona -mfpmath=sse -msse2  $< -c -o $@
-BIN_RULE = $(CXX) $(CPPFLAGS) -O3 -march=nocona -mfpmath=sse -msse2  $^ -o $(BIN_DIR)/$@; \
+OBJ_RULE = $(CXX) $(CPPFLAGS) -O3 -mfpmath=sse -msse2 $< -c -o $@
+BIN_RULE = $(CXX) $(CPPFLAGS) -O3 -mfpmath=sse -msse2 $^ -o $(BIN_DIR)/$@; \
            chmod 755 $(BIN_DIR)/$@
 AUX_BIN_RULE = $(CXX) $(CPPFLAGS) $^ -o $(AUX_BIN_DIR)/$@; \
            chmod 755 $(AUX_BIN_DIR)/$@
