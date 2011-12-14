@@ -126,7 +126,7 @@ using namespace std;
 //There is no limit on the number of sequences per genome
 //Used to set size of std::bitset<> only
 //TODO, replace with boost::dynamic_bitset to avoid setting a limit
-#define MAXGENOMES 128
+#define MAXGENOMES 256
 
 //Print LCB stats
 #define LCBSTATS 1
