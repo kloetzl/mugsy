@@ -8,7 +8,7 @@
 //#define SEQAN_PROFILE2 //more verbose. SEQAN_PROFILE must also be defined
 //#define SEQAN_TEST
 #define NDEBUG //define this to disable assert statements
-//#define KEEPCHAINTMP
+#define KEEPCHAINTMP
 
 #define TIMING
 #ifdef TIMING
@@ -4424,7 +4424,7 @@ void printUniques(TStringSet &seqSet,
     typename std::map<TName,std::vector<TLoc> >::iterator ait=aintervals.find(sequenceNames[i]);
     if(ait!=aintervals.end()){
       sort(ait->second.begin(),ait->second.end(),poscmp<TLoc>());
-      int last=-1;
+      int last=0;
       int open=0;
       int indup=0;
       std::vector<int> currdups;
@@ -4438,7 +4438,7 @@ void printUniques(TStringSet &seqSet,
 	if(pit->second>0){
 	  if(pit->second==1){//duplication start
 	    indup++;
-	    currdups.push_back(pit->blocknum);
+	     currdups.push_back(pit->blocknum);
 	  }
 	  else{
 #ifdef DEBUGGING
@@ -4448,7 +4448,7 @@ void printUniques(TStringSet &seqSet,
 		      << " indup:" << indup <<std::endl;
 #endif
 	    if(open==0){
-	      if(last>0 && pit->first-last>0){
+	      if(pit->first-last>0){
 		if(indup){
 		  //print as dup
 		  //std::cout << "DUP" << std::endl;
@@ -4459,7 +4459,7 @@ void printUniques(TStringSet &seqSet,
 		      strmmaf << ",";
 		    }
 		  }
-		  strmmaf << std::endl;
+		   strmmaf << std::endl;
 		}
 		else{
 		  strmmaf << "a score=0 label=u" << icount++ << " mult=1" << std::endl;
@@ -4537,13 +4537,13 @@ void printUniques(TStringSet &seqSet,
 }
 
 template<typename TStringSet, 
-    typename TCargo, 
-    typename TSpec, 
-    typename TStringSet1, 
-    typename TNames, 
-    typename TGenomeNames,
-    typename TIntervals,
-    typename TScore>
+	 typename TCargo, 
+	 typename TSpec, 
+	 typename TStringSet1, 
+	 typename TNames, 
+	 typename TGenomeNames,
+	 typename TIntervals,
+	 typename TScore>
 void
 singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gAlign, 
 				TStringSet1& sequenceSet,
@@ -4565,7 +4565,7 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
   typedef typename EdgeDescriptor<TGraph>::Type TEdgeDescriptor;
   
   typedef double TDistanceValue;
-
+  
 #ifdef SEQAN_PROFILE
   std::cerr << "Mugsy WGA" << std::endl;
   std::cerr << "Reading sequences and alignments " << std::endl;
@@ -4585,7 +4585,7 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
   nGenomes = nGenomes+1;
   std::cerr << "Number of genomes:" << nGenomes << std::endl;
   std::cerr << "Number of sequences:" << nSeq << std::endl;
-      
+  
   // Containers for segment matches and corresponding scores 
   typedef String<Fragment<> > TFragmentString;
   TFragmentString matches;
@@ -4646,7 +4646,7 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
   process_mem_usage(vm, rss);
   cout << "VM: " << vm << "; RSS: " << rss << endl;
 #endif
-
+  
   //Build StringSet for each genome
   TStringSet1 genomeSeqSet;
   TSize seqSetLen = length(seqSet);
@@ -4672,12 +4672,12 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
 #ifdef SEQAN_PROFILE
   std::cerr << "Building guide trees" << std::endl;
 #endif
-
+  
   /*
   // Set-up a distance matrix
   typedef String<TDistanceValue> TDistanceMatrix;
   TDistanceMatrix distanceMatrix;
- 
+  
   clear(distanceMatrix);
   //Calculate initial
   //Guide tree over all genomes
@@ -4691,7 +4691,7 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
   TMatrixIterator matIt = begin(distanceMatrix, Standard());
   TMatrixIterator endMatIt = end(distanceMatrix, Standard());
   for(;matIt != endMatIt;++matIt) 
-    *matIt = SEQAN_DISTANCE_UNITY - (*matIt);
+  *matIt = SEQAN_DISTANCE_UNITY - (*matIt);
   if (msaOpt.build == 0) njTree(distanceMatrix, genomeguideTree);
   else if (msaOpt.build == 1) upgmaTree(distanceMatrix, genomeguideTree, UpgmaMin());
   else if (msaOpt.build == 2) upgmaTree(distanceMatrix, genomeguideTree, UpgmaMax());
@@ -4706,7 +4706,7 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
   //Build alignment graph
   //
   // Use these segment matches for the initial alignment graph
-#ifdef SEQAN_PROFILE
+ #ifdef SEQAN_PROFILE
   std::cerr << "Building alignment graph from " << length(matches) << " matches" << std::endl;
 #endif
   TGraph g(seqSet);
@@ -4722,7 +4722,7 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
   process_mem_usage(vm, rss);
   cout << "VM: " << vm << "; RSS: " << rss << endl;
 #endif
-
+  
   std::cerr << std::endl << "Refined alignment graph built. E: " << numEdges(g) << " V:" << numVertices(g) << std::endl;
   
   //Stats
@@ -4734,7 +4734,7 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
     if(degree(g,*itV)>0){
       totalmatchingbp+=fragmentLength(g,*itV);
     }
-  }
+   }
   for(unsigned int i=0;i<seqSetLen;i++){
     totalseqlen+=length(seqSet[i]);
   }
@@ -4847,7 +4847,7 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
   typedef SVABlock<TComponent,unsigned,TVertexDescriptor,unsigned> TBlock;
   std::vector<std::vector<TVertexDescriptor> > lcbs;
   std::map<TVertexDescriptor,char> vertexOrientMap;
- 
+  
   //LCBs are saved in lcbsp
   //Optionally, can also store profiles and write directly to strmmaf
   wholeGenomeAlignment(g,
@@ -4862,15 +4862,15 @@ singlepass_wholeGenomeAlignment(Graph<Alignment<TStringSet, TCargo, TSpec> >& gA
 		       aintervals);
   //Close out MAF
   strmmaf << std::endl;
-
+  
   //loop over all profiles and print
-
+  
   //Print all remaining unaligned sequences
   //TODO broken in refactor, fix 
   if(msaOpt.unique == "true"){
     printUniques(seqSet,sequenceNames,aintervals,strmmaf);
   }
-
+  
   //Close output streams
   strmmaf.close();
 
