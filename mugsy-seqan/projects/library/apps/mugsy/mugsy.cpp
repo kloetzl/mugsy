@@ -8,7 +8,7 @@
 //#define SEQAN_PROFILE2 //more verbose. SEQAN_PROFILE must also be defined
 //#define SEQAN_TEST
 #define NDEBUG //define this to disable assert statements
-#define KEEPCHAINTMP
+//#define KEEPCHAINTMP
 
 #define TIMING
 #ifdef TIMING
