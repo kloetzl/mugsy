@@ -1,5 +1,5 @@
 #Set release name or install directory
-RELEASE_NAME=mugsy_x86-64-v1r2.1
+RELEASE_NAME=mugsy_x86-64-v1r2.3
 INSTALL_DIR=./${RELEASE_NAME}
 
 
