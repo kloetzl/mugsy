@@ -8,7 +8,8 @@ SCRIPT_DIR := $$ENV{'MUGSY_INSTALL'}/MUMmer3.20/scripts
 
 SED := $(filter /%,$(shell /bin/sh -c 'type sed'))
 CSH := $(filter /%,$(shell /bin/sh -c 'type csh'))
-PERL := $(filter /%,$(shell /bin/sh -c 'type perl'))
+PERL := '/usr/bin/perl'
+#$(filter /%,$(shell /bin/sh -c 'type perl'))
 VPATH := $(BIN_DIR)
 
 ALL := exact-tandems mapview mummerplot nucmer promer \
