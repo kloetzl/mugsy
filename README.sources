@@ -36,5 +36,8 @@ graph_impl_fragment.h
 mugsy-seqan/projects/library/apps/mugsy/libmaf.a
 ----------------
 A library of maf conversion utilities was built from Multiz 
-downloaded from here http://www.bx.psu.edu/miller_lab/
+downloaded from here http://www.bx.psu.edu/miller_lab/multiz-tba.012109.tar.gz
+built with
+libmaf.a: mz_scores.o charvec.o nib.o seq.o multi_util.o maf.o util.o
+        ar rsc $@ mz_scores.o charvec.o nib.o seq.o multi_util.o maf.o util.o  
 

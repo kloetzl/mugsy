@@ -513,12 +513,12 @@ matchRefinement(TAlignmentString & alis,
 	//build interval trees
 	String<TGraph> gs;
 	String<TPropertyMap> pms;
-	//std::cout <<"creating trees..."<<std::flush;
+	std::cerr <<"creating trees..."<<std::flush;
 	createTreesForAllSequences(gs, pms, alis, seq, seq_map, numSequences);
 	
 	////////////////////////////////////////////////////////////////
 	//do refinement
-	//std::cout <<"refining..."<<std::flush;
+	std::cerr <<"refining..."<<std::flush;
 	clock_t start, finish1;
 	double duration;
 	start = clock();
@@ -549,7 +549,7 @@ matchRefinement(TAlignmentString & alis,
 		}	
 		++ali_it;
 	}
-	//std::cout << "starting..."<<std::flush;
+	std::cerr << "starting..."<<std::flush;
 	TSetIterator queueIt;
 	bool done = false;
 	while(!done)
@@ -557,7 +557,7 @@ matchRefinement(TAlignmentString & alis,
 		for(unsigned seq_i_pos = 0; seq_i_pos < numSequences; ++seq_i_pos)
 		{
 			queueIt = all_node_queues[seq_i_pos].begin();
-			//std::cout << "processing seq "<<seq_i_pos << "..."<<std::flush;
+			std::cerr << "processing seq "<<seq_i_pos << "..."<<std::flush;
 			while (queueIt != all_node_queues[seq_i_pos].end())
 			{
 				TValue node_i = *queueIt;
@@ -577,11 +577,11 @@ matchRefinement(TAlignmentString & alis,
 						//get the sequence that node_i needs to be projected onto (seq_j)
 						//and get the projected position (pos_j)
 						TValue seq_j_id, node_j;
-						//std::cout << "REFINE PREGRAPH-DEBUG SEQ1:" << seq_i_id << " coord:" << node_i 
-						//<< " SEQ2:" << seq_j_id << " coord:" << node_j << std::endl;
+						std::cerr << "REFINE PREGRAPH-DEBUG SEQ1:" << seq_i_id << " coord:" << node_i 
+						<< " SEQ2:" << seq_j_id << " coord:" << node_j << std::endl;
 						_getOtherSequenceAndProject(alis[*segment_it],seq_map,seq_i_id,node_i,seq_j_id,node_j);
-						//std::cout << "REFINE PREGRAPH SEQ1:" << seq_i_id << " coord:" << node_i 
-						//<< " SEQ2:" << seq_j_id << " coord:" << node_j << std::endl;
+						std::cerr << "REFINE PREGRAPH SEQ1:" << seq_i_id << " coord:" << node_i 
+						<< " SEQ2:" << seq_j_id << " coord:" << node_j << std::endl;
 						TValue seq_j_pos = idToPosition(seq,seq_j_id);
 						updateCutPosition(alis[*segment_it],node_j);
 
@@ -612,12 +612,12 @@ matchRefinement(TAlignmentString & alis,
 		if(i==numSequences)
 			done=true;
 	}
-	//std::cout << "adding cuts" << std::endl;
+	std::cerr << "adding cuts" << std::endl;
 	_addAnnotationCuts(all_nodes,alis,gs,pms,seq,seq_map,annotation,min_fragment_len,tag);
 
 	finish1 = clock();
 	duration = (double)(finish1 - start) / CLOCKS_PER_SEC;
-	//std::cout << "\ntook " << duration << " seconds.\n";
+	std::cerr << "\ntook " << duration << " seconds.\n";
 	//for(int seq_i = 0; seq_i < length(seq); ++seq_i)
 	//{
 	//	typename std::set<TValue>::iterator it = all_nodes[seq_i].begin();

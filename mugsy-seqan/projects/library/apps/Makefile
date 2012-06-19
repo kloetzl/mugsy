@@ -20,7 +20,8 @@ endif
 #CXXFLAGS += -m64
 
 CXXFLAGS += -I$(SEQAN_BASE)
-CXXFLAGS += -O9 -march=nocona -mfpmath=sse -msse2
+CXXFLAGS += -O9 
+#-march=nocona -mfpmath=sse -msse2
 #CXXFLAGS += -O0 -g
 CXXFLAGS += -pedantic -W -Wall
 CXXFLAGS += -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 ${CXXEXTRAFLAGS}
