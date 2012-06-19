@@ -8,14 +8,18 @@ eg.
 
 export PERL5LIB=/path/to/mugsy-annotator:${PERL5LIB}
 
-#(1) To run Mugsy-Annotator using the wrapper, you need genome FASTA files and annotations
-#in either gff3 or genbank flat file format
-#first run mugsy to generate a whole genome alignment
+(1) To run Mugsy-Annotator using the wrapper, you need genome FASTA
+files and annotations in either gff3 or genbank flat file format first
+run mugsy to generate a whole genome alignment. 
+Genbank .gbk inputs require bp_genbank2gff3.pl from Bioperl 
 
 mugsy --prefix mygenomes genome1.fsa genome2.fsa genome3.fsa
-#default output is in /tmp/mygenomes.fsa
+#default output is in /tmp/mygenomes.maf
+
 cat genome1.fsa genome2.fsa genome3.fsa > allgenomes.fsa
 mugsy-annotator allgenomes.fsa /tmp/mygenomes.maf genome1.gff genome2.gff genome3.gff
+
+Note, the input fasta file and MAF need to have matching sequence names in the format genome.seqname
 
 #(2) Alternatively, execute the individual steps outside the wrapper
 

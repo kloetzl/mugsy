@@ -1,0 +1,40 @@
+Download 3 genomes from Genbank ftp site, align, and run mugsy annotator
+
+#Get annotations
+wget ftp://ftp.ncbi.nih.gov/genbank/genomes/Bacteria/Escherichia_coli_APEC_O1_uid16718/CP000468.gbk
+wget ftp://ftp.ncbi.nih.gov/genbank/genomes/Bacteria/Escherichia_coli_K_12_substr__DH10B_uid20079/CP000948.gbk
+wget ftp://ftp.ncbi.nih.gov/genbank/genomes/Bacteria/Escherichia_coli_O157H7_EDL933_uid259/AE005174.gbk
+
+#Get genome FASTA
+wget ftp://ftp.ncbi.nih.gov/genbank/genomes/Bacteria/Escherichia_coli_APEC_O1_uid16718/CP000468.fna
+wget ftp://ftp.ncbi.nih.gov/genbank/genomes/Bacteria/Escherichia_coli_K_12_substr__DH10B_uid20079/CP000948.fna
+wget ftp://ftp.ncbi.nih.gov/genbank/genomes/Bacteria/Escherichia_coli_O157H7_EDL933_uid259/AE005174.fna
+
+#Calculate alignment
+mugsy --directory `pwd` --prefix ecolitest *.fna
+
+#Run mugsy-annotator
+cat *.fna > ecolitest.fsa
+mugsy-annotator ecolitest.fsa ecolitest.maf *.gbk > ecolitest.mugsyannotator.out
+
+This will output matching genes but will also throw errors "Can't find
+seqname" that will prevent calculating agreement information. The
+error results from a reformatting of the sequence names in the MAF
+output by Mugsy. To fix this, update the original FASTA headers to
+match the sequence names used in the MAF, which are in the form
+genome.seqname.
+
+Eg.
+perl -pi -e 's/^>.*\|gb\|(\w+).*/>$1/' AE005174.fna
+perl -pi -e 's/^>.*\|gb\|(\w+).*/>$1/' CP000948.fna
+perl -pi -e 's/^>.*\|gb\|(\w+).*/>$1/' CP000468.fna
+cat *.fna > ecolitest.fsa
+
+Once fixed, mugsy-annotator should produce output, including agreement information
+mugsy-annotator ecolitest.fsa ecolitest.maf *.gbk > ecolitest.mugsyannotator.out
+
+A legend of the codes used in the output file is at the end of the output file
+
+
+
+
