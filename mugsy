@@ -397,7 +397,7 @@ foreach my $seqfile (@inputseqfiles){
 		$header = $2;
 		print $logfh "Parsing FASTA entry header:$header speciesname:$speciesname\n" if($options{'debug'});
 	    }
-	    elsif($line =~ /gi\|\d+\|\w+\|([^.]+)\S+\|/){
+	    elsif($line =~ /gi\|\d+\|\w+\|([^.]+)\|\S+/){
 		#special handling of ncbi formatted headers
 		#just pull accession
 		$header = $1;
