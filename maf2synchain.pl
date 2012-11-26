@@ -49,6 +49,7 @@ while(my $line=<STDIN>){
 	$anchors->{$anchornum}->{$accession}->{'start'} = ($start<$end ? $start:$end);
 	$anchors->{$anchornum}->{$accession}->{'end'} = ($start>$end ? $start:$end);
 	$anchors->{$anchornum}->{$accession}->{'orient'} = $orientation;
+	die "Can't find in $anchornum,$accession" if(! exists $anchors->{$anchornum}->{$accession});
 	$seq2anchors->{$accession}->{$anchornum}++;
     }
     else{
@@ -57,16 +58,27 @@ while(my $line=<STDIN>){
 }
 #Foreach sequence, sort anchors by coordinate and print distance between adjacent coords
 foreach my $accession (sort {$a cmp $b} (keys %$seq2index)){
-    my @sortedanchors =  sort {$anchors->{$a}->{$accession}->{'start'} <=> $anchors->{$b}->{$accession}->{'start'}} (keys %{$seq2anchors});
+    my @sortedanchors =  sort {$anchors->{$a}->{$accession}->{'start'} <=> $anchors->{$b}->{$accession}->{'start'}} (keys %{$seq2anchors->{$accession}});
+    my $genome;
+    if($accession =~ /([^\.]+)\.(\S+)/){
+	$genome=$1;
+    }
+    else{
+	    die "Accession not in Genome.Sequence format";
+    }
     for(my $i=0;$i<scalar(@sortedanchors)-1;$i++){
 	my $a1 =  $sortedanchors[$i];
 	my $a2 =  $sortedanchors[$i+1];
-	my $dist = &getDistance($anchors->{$a1},$anchors->{$a2});
-	print STDERR "Bad coords a1:$anchors->{$a1}->{'start'} - $anchors->{$a1}->{'end'} a2:$anchors->{$a2}->{'start'} - $anchors->{$a2}->{'end'}" if($dist < 0);
+	die "Can't find in $a1,$accession" if(! exists $anchors->{$a1}->{$accession});
+	die "Can't find in $a2,$accession" if(! exists $anchors->{$a2}->{$accession});
+	my $dist = &getDistance($anchors->{$a1}->{$accession},$anchors->{$a2}->{$accession});
+	print STDERR "Bad coords Accession:$accession a1:$a1 $anchors->{$a1}->{$accession}->{'start'} - $anchors->{$a1}->{$accession}->{'end'} a2:$a2 $anchors->{$a2}->{$accession}->{'start'} - $anchors->{$a2}->{$accession}->{'end'}\n" if($dist < 0);
+	print STDERR "Genome $genome $genome2index->{$genome} missing" if(!exists $genome2index->{$genome});
+	$dist = 0 if($dist<0);
 	print $a1," ",$a2," ",                             #Anchors
 	    $seq2index->{$accession}," ",                  #Seqindex
 	    $dist," ",                                     #Distance between anchors
-	$genome2index->{$accession}," ",                   #Genomeindex
+	$genome2index->{$genome}," ",                   #Genomeindex
 	$anchors->{$a1}->{$accession}->{'orient'}," ",$anchors->{$a2}->{$accession}->{'orient'}," ", #Orientation
 	$anchors->{$a1}->{$accession}->{'start'}," ",$anchors->{$a2}->{$accession}->{'start'}," ",   #Anchor1 coords
 	$anchors->{$a1}->{$accession}->{'end'}," ",$anchors->{$a2}->{$accession}->{'end'}," ",       #Anchor2 coords
@@ -77,6 +89,8 @@ foreach my $accession (sort {$a cmp $b} (keys %$seq2index)){
 
 sub getDistance{
     my($anchors1,$anchors2) = @_;
+    return (abs($anchors2->{'start'} - $anchors1->{'end'}));
+    #Short circuit for now
     if($anchors1->{'orient'} eq '-' && $anchors2->{'orient'} eq '-'){
 	# <e----s|  <e----s|
 	return $anchors2->{'end'} - $anchors1->{'start'};
@@ -89,7 +103,7 @@ sub getDistance{
 	# |s---e> <e---s|
 	return $anchors2->{'end'} - $anchors1->{'end'};
     }
-    elsif($anchors1->{'orient'} eq '+' && $anchors2->{'orient'} eq '-'){
+    elsif($anchors1->{'orient'} eq '+' && $anchors2->{'orient'} eq '+'){
 	# |s---e> |s---e>
 	return $anchors2->{'start'} - $anchors1->{'end'};
     }
