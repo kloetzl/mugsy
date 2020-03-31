@@ -108,18 +108,18 @@ typedef std::bitset<BITMAX> BitMask;
 typedef pair<Label,Orientation> OrientedLabel;
 
 struct orientedlabelhasher {
-  size_t operator()(const OrientedLabel& v) const { return hash<Label>()(v.first); }
+  size_t operator()(const OrientedLabel& v) const { return std::hash<Label>()(v.first); }
 };
 
 //faster for bitsets that can fit in ulong
 //otherwise will throw an overflow exception
 struct bitsethasher_ulong {
-  size_t operator()(const BitMask& v) const { return hash<long unsigned int>()(v.to_ulong()); }
+  size_t operator()(const BitMask& v) const { return std::hash<long unsigned int>()(v.to_ulong()); }
 };
 
 //general for bitsets of any size
 struct bitsethasher_string {
-  size_t operator()(const BitMask& v) const { return hash<std::string>()(v.to_string()); }
+  size_t operator()(const BitMask& v) const { return std::hash<std::string>()(v.to_string()); }
 };
 
 struct orientedlabelcmp {

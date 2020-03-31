@@ -101,11 +101,11 @@
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/properties.hpp>
-#include <boost/property_map.hpp>
+#include <boost/property_map/property_map.hpp>
 #include <boost/graph/breadth_first_search.hpp>
 
 #include <boost/graph/edmonds_karp_max_flow.hpp>
-#include <boost/graph/kolmogorov_max_flow.hpp>
+#include <boost/graph/boykov_kolmogorov_max_flow.hpp>
 #include <boost/graph/push_relabel_max_flow.hpp>
 
 #include <boost/graph/adjacency_list.hpp>

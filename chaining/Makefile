@@ -16,7 +16,7 @@ ifndef AUX_BIN_DIR
 AUX_BIN_DIR := $(CURDIR)
 endif
 OBJ_RULE = $(CXX) $(CPPFLAGS) $< -static -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -c -o $@
-BIN_RULE = $(CXX) $(CPPFLAGS) $^ -static -L /usr/local/projects/angiuoli/boost/lib/ -lbgl-viz -lboost_graph-gcc41-mt -o $(BIN_DIR)/$@; \
+BIN_RULE = $(CXX) $(CPPFLAGS) $^ -static -L /usr/local/projects/angiuoli/boost/lib/ -o $(BIN_DIR)/$@; \
            chmod 755 $(BIN_DIR)/$@
 AUX_BIN_RULE = $(CXX) $(CPPFLAGS) $^ -o $(AUX_BIN_DIR)/$@; \
            chmod 755 $(AUX_BIN_DIR)/$@
