@@ -529,7 +529,7 @@ typedef Tag<TagFastq_> const Fastq;
 		unsigned int numval;
 		// Actual information encoded in qseq file may vary. Take a few guesses:
 		//     machine name, run number, lane number, tile number
-		return is >> mname >> numval >> numval >> numval;
+		return (is >> mname >> numval >> numval >> numval).good();
 	}
 	
 	template < typename TFilename >

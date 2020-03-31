@@ -30,7 +30,7 @@ else
  MUGSYCODEDIR=/usr/local/projects/angiuoli/mugsy_trunk
 endif
 
-CCFlags += -I $(MUGSYCODEDIR) -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -pedantic -ftemplate-depth-200 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64
+CCFlags += -I $(MUGSYCODEDIR) -I /usr/local/projects/angiuoli/boost/include/boost-1_38 -pedantic -ftemplate-depth-200 -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -fpermissive -fPIE
 #Modified by SVA
 #LDFlags += /usr/local/projects/angiuoli/developer/sangiuoli/mummer/trunk/MUMmer3.20/src/tigr/*.o
 LDFlags += -lstdc++
