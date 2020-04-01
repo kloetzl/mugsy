@@ -97,9 +97,9 @@ endef
 # Link $(1) to output file $(2)
 define cmdLink
 	@echo $(Indent)link $(2)
-	@echo "  " $(Compiler) $(LDFlags) -L projects/library/apps/mugsy/ -L $(MUGSYCODEDIR)/maflib -lmaf -o "$(2)"
+	@echo "  " $(Compiler) $(LDFlags) -L projects/library/apps/mugsy/ -L ../src-libmaf/ -lmaf -o "$(2)"
 	#MODIFIED BY SVA
-        @$(Compiler) $(1) $(LDFlags) -L projects/library/apps/mugsy/ -L $(MUGSYCODEDIR)/maflib -lmaf -o "$(2)"
+        @$(Compiler) $(1) $(LDFlags) -L projects/library/apps/mugsy/ -L ../src-libmaf/ -lmaf -o "$(2)"
 endef
 
 
