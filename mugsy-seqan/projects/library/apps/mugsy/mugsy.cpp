@@ -31,9 +31,10 @@ time_t lasttime;
 #include <seqan/graph_types.h>
 #include <seqan/graph_align.h>
 #include <seqan/modifier.h>
-#include <seqan/refinement.h>
+// #include <seqan/refinement.h>
+#include <seqan/graph_msa/graph_align_tcoffee_refinement.h>
 
-#include "rna_alphabet.h"
+// #include "rna_alphabet.h"
 #include <seqan/modifier.h>
 #include <seqan/misc/misc_cmdparser.h>
 
