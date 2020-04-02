@@ -3,12 +3,16 @@ RELEASE_NAME=mugsy_x86-64-v1r2.3.1
 INSTALL_DIR=./${RELEASE_NAME}
 
 
-all: nucmer synchain_mugsy mugsy_seqan
+all: synchain_mugsy mugsy_seqan
 
-install: mugsy_install mummer_install
+install: mugsy_install
 
 dist:
 	tar cvzf ${RELEASE_NAME}.tgz ${INSTALL_DIR}
+
+src-libmaf/libmaf.a:
+	make -C $(@D) $(@F)
+
 nucmer:
 	make -C MUMmer3.20 all
 
