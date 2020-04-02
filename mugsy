@@ -304,7 +304,7 @@ if(!defined $options{'nucmeropts'}){
     #Added -l 15 to make defaults comparable with Mauve defaults
     $options{'nucmeropts'} = $options{'nucmeropts'}." -l 15";
 }
-if(defined $options{'collinear'}){
+if(defined $options{'colinear'}){
     $options{'nucmeropts'} .= $options{'nucmeropts'}." -maxmatch";
 }
 die "Cannot pass both --refine and --skiprefine" if(exists $options{'refine'} && exists $options{'skiprefine'});
